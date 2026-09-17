@@ -4,23 +4,37 @@ import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers
 // Model weights cache via the library's default (browser HTTP cache + IndexedDB); no extra wiring needed.
 env.allowLocalModels = false;
 
+// logs one line per model file so a slow/stalled ~75MB download is visible, not indistinguishable from a hang.
+function logProgress(data) {
+  if (data.status === 'progress') {
+    console.log(`[ytsb] downloading ${data.file}: ${Math.round(data.progress)}%`);
+  } else if (data.status === 'done') {
+    console.log(`[ytsb] fetched ${data.file}`);
+  }
+}
+
 let transcriberPromise = null;
 function getTranscriber() {
   if (!transcriberPromise) {
     console.log('[ytsb] loading Whisper tiny.en (webgpu, falls back to wasm)...');
     transcriberPromise = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
       device: 'webgpu',
+      progress_callback: logProgress,
     })
       .then((t) => {
         console.log('[ytsb] Whisper loaded on webgpu');
         return t;
       })
-      .catch(() =>
-        pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', { device: 'wasm' }).then((t) => {
+      .catch((err) => {
+        console.warn('[ytsb] webgpu load failed, falling back to wasm:', err.message);
+        return pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
+          device: 'wasm',
+          progress_callback: logProgress,
+        }).then((t) => {
           console.log('[ytsb] Whisper loaded on wasm');
           return t;
-        })
-      );
+        });
+      });
   }
   return transcriberPromise;
 }
@@ -29,19 +43,25 @@ self.onmessage = async (e) => {
   const { type, videoId, chunkRange, pcm, sampleRate } = e.data;
   if (type !== 'transcribeChunk') return;
 
-  console.log(`[ytsb] transcribing chunk [${chunkRange[0]}s-${chunkRange[1]}s]...`);
-  const transcriber = await getTranscriber();
-  const [chunkStart] = chunkRange;
+  try {
+    console.log(`[ytsb] transcribing chunk [${chunkRange[0]}s-${chunkRange[1]}s]...`);
+    const transcriber = await getTranscriber();
+    const [chunkStart] = chunkRange;
 
-  const result = await transcriber(pcm, {
-    sampling_rate: sampleRate,
-    return_timestamps: 'word',
-    chunk_length_s: 30,
-  });
+    const result = await transcriber(pcm, {
+      sampling_rate: sampleRate,
+      return_timestamps: 'word',
+      chunk_length_s: 30,
+    });
 
-  const segments = groupIntoSegments(result, chunkStart);
-  console.log(`[ytsb] chunk [${chunkRange[0]}s-${chunkRange[1]}s] done: "${result.text}"`);
-  self.postMessage({ type: 'chunkResult', videoId, chunkRange, segments });
+    const segments = groupIntoSegments(result, chunkStart);
+    console.log(`[ytsb] chunk [${chunkRange[0]}s-${chunkRange[1]}s] done: "${result.text}"`);
+    self.postMessage({ type: 'chunkResult', videoId, chunkRange, segments });
+  } catch (err) {
+    // still posts a (empty) result so background.js/content.js don't wedge waiting on this chunk forever.
+    console.error(`[ytsb] chunk [${chunkRange[0]}s-${chunkRange[1]}s] failed:`, err.message, err);
+    self.postMessage({ type: 'chunkResult', videoId, chunkRange, segments: [] });
+  }
 };
 
 // Groups word-level timestamps into sentence-ish segments and offsets them to absolute video time.
