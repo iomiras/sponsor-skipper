@@ -26,23 +26,34 @@ let captureBuffer = [];
 let captureStart = 0;
 let workerBacklog = 0;
 
-const worker = new Worker(chrome.runtime.getURL('worker.js'), { type: 'module' });
+let worker = null;
 
-worker.onmessage = (e) => {
-  const { type, chunkRange, segments } = e.data;
-  if (type !== 'chunkResult') return;
-  workerBacklog = Math.max(0, workerBacklog - 1);
-  console.log(`[ytsb] transcribed chunk [${chunkRange[0]}s-${chunkRange[1]}s]: ${segments.length} segment(s)`, segments);
-  chrome.runtime.sendMessage(
-    { type: 'chunkProcessed', videoId, chunkRange, segments },
-    (state) => {
-      if (state) {
-        sponsorRanges = state.sponsorRanges;
-        console.log('[ytsb] sponsor ranges now:', sponsorRanges);
+// Constructing a Worker directly off a chrome-extension:// URL can still throw
+// SecurityError from a content script even when web_accessible_resources lists
+// it, so fetch the source and spawn from a same-origin blob: URL instead.
+async function initWorker() {
+  const src = await fetch(chrome.runtime.getURL('worker.js')).then((r) => r.text());
+  const blobUrl = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+  worker = new Worker(blobUrl, { type: 'module' });
+
+  worker.onmessage = (e) => {
+    const { type, chunkRange, segments } = e.data;
+    if (type !== 'chunkResult') return;
+    workerBacklog = Math.max(0, workerBacklog - 1);
+    console.log(`[ytsb] transcribed chunk [${chunkRange[0]}s-${chunkRange[1]}s]: ${segments.length} segment(s)`, segments);
+    chrome.runtime.sendMessage(
+      { type: 'chunkProcessed', videoId, chunkRange, segments },
+      (state) => {
+        if (state) {
+          sponsorRanges = state.sponsorRanges;
+          console.log('[ytsb] sponsor ranges now:', sponsorRanges);
+        }
       }
-    }
-  );
-};
+    );
+  };
+  console.log('[ytsb] worker ready');
+}
+initWorker();
 
 function extractVideoId(url) {
   const match = url.match(/[?&]v=([^&]+)/);
@@ -91,7 +102,7 @@ function setupAudioTap() {
 }
 
 function shouldBeCapturing() {
-  return enabled && processedUpTo < video.currentTime + LOOKAHEAD_SECONDS && workerBacklog < MAX_WORKER_BACKLOG;
+  return enabled && worker && processedUpTo < video.currentTime + LOOKAHEAD_SECONDS && workerBacklog < MAX_WORKER_BACKLOG;
 }
 
 function finalizeChunk() {
