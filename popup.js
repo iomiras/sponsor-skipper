@@ -22,9 +22,8 @@ async function main() {
       ]);
       if (info.error) throw new Error(info.error);
       if (!toggle.checked) status.textContent = 'Sponsor skipping is off.';
-      else if (playback.bypass) status.textContent = 'Continuing without skipping for this video.';
-      else if (playback.error) status.textContent = `Analysis unavailable: ${playback.error}`;
-      else if (playback.held || !info.source) status.textContent = 'Preparing sponsor skips…';
+      else if (playback.error) status.textContent = `Analysis will retry: ${playback.error}`;
+      else if (!info.source) status.textContent = 'Analyzing in the background…';
       else {
         const end = ytsbTimeline.checkedEnd(info.processedChunks, playback.position);
         const source = info.source === 'captions' ? 'Captions' : 'Audio fallback';

@@ -41,4 +41,4 @@ The terminal prints source selection, caption counts, request IDs, timing, trans
 
 If YouTube extraction fails, update `.venv/bin/pip install --upgrade 'yt-dlp[default]'` and restart. Private/restricted videos, live streams, unavailable captions, and YouTube rate limits can prevent analysis. No browser cookies are read automatically.
 
-The player shows errors with Retry and Continue without skipping buttons. It never marks a failed request as checked.
+Analysis errors appear in the extension popup and console, and retry after 30 seconds. Playback continues normally. Failed requests are never marked as checked.

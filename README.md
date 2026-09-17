@@ -6,7 +6,7 @@ A Chrome MV3 extension that analyzes timed captions ahead of playback and skips 
 
 1. Follow `server/README.md` for dependencies. Start the backend with `cd server`, `export TYPESAFE_API_KEY='your-key'`, then `npm start`.
 2. Open `chrome://extensions`, enable Developer Mode, and load this project's root directory as an unpacked extension. If already loaded, click Reload.
-3. Refresh the YouTube tab. The player shows **Preparing sponsor skips…**, then resumes once the current section is checked.
+3. Refresh the YouTube tab and watch normally. Analysis runs in the background; detected sponsor segments are skipped automatically.
 
 After any code change, restart the server, reload the extension, and refresh YouTube.
 
@@ -15,13 +15,13 @@ After any code change, restart the server, reload the extension, and refresh You
 - Fetches the full timed subtitles, including automatic captions, without running Whisper when captions are usable.
 - Classifies 60-second sections near the current playback position and maintains about two minutes of checked coverage ahead.
 - For videos without usable captions, downloads 30-second audio slices independently of the player, then transcribes locally with Whisper.
-- Pauses before an unchecked section or after a seek; resumes when ready. The preparation notice offers Retry on errors and Continue without skipping for this video.
+- Playback continues while analysis runs, including after seeking into unchecked content. A newly detected sponsor is skipped immediately if playback is already inside it. There is no preparation overlay or automatic pause/resume.
 - Caches completed classifications in extension storage. Concurrent tabs of the same video serialize updates. Old live-capture cache entries are ignored.
-- The popup shows the source, seconds checked ahead, and detected ranges. Turning the extension off releases any preparation pause.
+- The popup shows the source, seconds checked ahead, and detected ranges. Failed analysis retries after 30 seconds without interrupting playback.
 
 ## Limitations
 
-The first section requires a preparation delay. Seeking to an unchecked section or analysis falling behind playback requires another pause. Classifier mistakes and imperfect caption timestamps can cause missed or incorrect skips. Live streams and restricted videos may be unavailable. The audio fallback uses English-only Whisper tiny.en. YouTube's own ads are not the target; the player controller leaves recognized ad playback alone.
+If analysis is late, you may hear part or all of a sponsor before it is detected. Already-passed ranges do not rewind playback. Classifier mistakes and imperfect caption timestamps can cause missed or incorrect skips. Live streams and restricted videos may be unavailable. The audio fallback uses English-only Whisper tiny.en. YouTube's own ads are not the target; the player controller leaves recognized ad playback alone.
 
 Non-empty transcript segments and their context are sent to TypeSafe, so usage grows with viewing time. Audio fallback downloads and transcription run locally. The API key stays on the server.
 
