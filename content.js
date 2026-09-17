@@ -163,7 +163,8 @@ function onNavigate() {
 }
 
 function waitForVideoElement() {
-  const v = document.querySelector('video');
+  // .html5-main-video: the watch page can have a second hidden <video> (autoplay-next preview, Shorts shelf tile)
+  const v = document.querySelector('video.html5-main-video') || document.querySelector('#movie_player video');
   if (v && v !== video) {
     attachToVideo(v);
   }
