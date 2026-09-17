@@ -3,6 +3,8 @@
 // worker-src directive and falls back to script-src, which blocks a Worker
 // constructed from this page regardless of chrome-extension:// or blob: URL.
 
+console.log('[ytsb] content.js loaded');
+
 const LOOKAHEAD_SECONDS = 90;
 const CHUNK_SECONDS = 30;
 const MAX_WORKER_BACKLOG = 2; // caps in-flight chunks so capture doesn't outrun a slow transcriber
@@ -52,8 +54,15 @@ async function loadVideoState() {
 }
 
 function setupAudioTap() {
-  audioCtx = new AudioContext();
-  sourceNode = audioCtx.createMediaElementSource(video);
+  try {
+    audioCtx = new AudioContext();
+    sourceNode = audioCtx.createMediaElementSource(video);
+  } catch (err) {
+    // another extension may already hold a MediaElementSourceNode on this <video>;
+    // a media element can only ever be connected to one.
+    console.error('[ytsb] failed to tap video audio:', err.message);
+    return;
+  }
   sourceNode.connect(audioCtx.destination);
 
   captureNode = audioCtx.createScriptProcessor(4096, 1, 1);
@@ -138,8 +147,10 @@ function onTimeUpdate() {
 
 function attachToVideo(v) {
   video = v;
+  console.log('[ytsb] attached to video element, paused =', v.paused);
   video.addEventListener('timeupdate', onTimeUpdate);
   video.addEventListener('play', () => {
+    console.log('[ytsb] play event, starting audio tap');
     if (!audioCtx) setupAudioTap();
     else audioCtx.resume();
   });
