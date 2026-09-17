@@ -148,18 +148,28 @@ function onTimeUpdate() {
   lastTime = video.currentTime;
 }
 
+function startAudioTap() {
+  if (!audioCtx) setupAudioTap();
+  else audioCtx.resume();
+}
+
 function attachToVideo(v) {
   video = v;
   console.log('[ytsb] attached to video element, paused =', v.paused);
   video.addEventListener('timeupdate', onTimeUpdate);
   video.addEventListener('play', () => {
     console.log('[ytsb] play event, starting audio tap');
-    if (!audioCtx) setupAudioTap();
-    else audioCtx.resume();
+    startAudioTap();
   });
   video.addEventListener('pause', () => {
     // stop requesting new chunks; ScriptProcessor stays connected but shouldBeCapturing gates on video.paused
   });
+  // the video is usually already playing by the time we attach (autoplay, or a ?t= deep link),
+  // so its 'play' event has already fired and will not fire again.
+  if (!v.paused) {
+    console.log('[ytsb] video already playing at attach, starting audio tap');
+    startAudioTap();
+  }
 }
 
 function onNavigate() {
