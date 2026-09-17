@@ -1,23 +1,30 @@
 # YouTube Sponsor Segment Skipper
 
-A Chrome MV3 extension that auto-skips creator-inserted sponsor reads in YouTube videos. It transcribes audio locally with Whisper (via Transformers.js, running in a small local server) and classifies each transcript segment with TypeSafe's Jev models. It does not touch YouTube's own inserted ads; those are a DOM signal, out of scope here.
+A Chrome MV3 extension that analyzes timed captions ahead of playback and skips creator-inserted sponsor reads using TypeSafe's Jev classifier.
 
-## Install
+## Start
 
-1. Start the local server: see `server/README.md` (`cd server && npm install && export TYPESAFE_API_KEY=... && npm start`). This also downloads the Whisper model (~75MB) on its first request.
-2. Open `chrome://extensions`, enable Developer Mode, click "Load unpacked", and select this project's root directory.
-3. Open a YouTube video. The extension transcribes upcoming audio in the background and skips ranges it classifies as sponsor reads.
-4. Click the extension icon to toggle it on/off, see how far the current video has been checked, and manually skip a detected range.
+1. Follow `server/README.md` for dependencies. Start the backend with `cd server`, `export TYPESAFE_API_KEY='your-key'`, then `npm start`.
+2. Open `chrome://extensions`, enable Developer Mode, and load this project's root directory as an unpacked extension. If already loaded, click Reload.
+3. Refresh the YouTube tab. The player shows **Preparing sponsor skips…**, then resumes once the current section is checked.
 
-## Known limitations
+After any code change, restart the server, reload the extension, and refresh YouTube.
 
-- The lookahead window is a live guarantee only for unreached content.
-- A fast seek ahead of the window may briefly show unchecked content.
-- Sponsor segments with no distinct trigger phrase may be missed by the keyword prefilter.
-- Non-English or music-only sponsor reads are missed by the English-only STT.
+## Analysis ahead of playback
 
-## Architecture notes
+- Fetches the full timed subtitles, including automatic captions, without running Whisper when captions are usable.
+- Classifies 60-second sections near the current playback position and maintains about two minutes of checked coverage ahead.
+- For videos without usable captions, downloads 30-second audio slices independently of the player, then transcribes locally with Whisper.
+- Pauses before an unchecked section or after a seek; resumes when ready. The preparation notice offers Retry on errors and Continue without skipping for this video.
+- Caches completed classifications in extension storage. Concurrent tabs of the same video serialize updates. Old live-capture cache entries are ignored.
+- The popup shows the source, seconds checked ahead, and detected ranges. Turning the extension off releases any preparation pause.
 
-- `background.js` is the only file that talks to the local server (both `/transcribe` and `/classify`), and it is the only file that touches `chrome.storage.local`; `content.js` and `popup.js` read and write state through its message handlers.
-- Whisper runs inside `server/transcribe.js`, a Node process, not inside the browser. It started as a browser-side Web Worker, but youtube.com's CSP has no `worker-src` directive and falls back to `script-src`, which blocked every in-page attempt (a Worker built from `chrome-extension://`, from a `blob:` URL, and even from an offscreen document all hit some form of this). Moving it to a local Node server sidesteps every browser-specific restriction. It is still fully local: the server only ever binds to `localhost`, so audio never leaves the machine, it just moves from the browser tab to a local Node process.
-- Audio is captured by tapping the video element's live playback (`MediaElementAudioSourceNode` plus a `ScriptProcessorNode`), so transcription trails playback by roughly one chunk rather than running arbitrarily far ahead; the `LOOKAHEAD_SECONDS` window governs when capture is active and when the popup reports content as checked, not a true prefetch of unplayed audio.
+## Limitations
+
+The first section requires a preparation delay. Seeking to an unchecked section or analysis falling behind playback requires another pause. Classifier mistakes and imperfect caption timestamps can cause missed or incorrect skips. Live streams and restricted videos may be unavailable. The audio fallback uses English-only Whisper tiny.en. YouTube's own ads are not the target; the player controller leaves recognized ad playback alone.
+
+Non-empty transcript segments and their context are sent to TypeSafe, so usage grows with viewing time. Audio fallback downloads and transcription run locally. The API key stays on the server.
+
+## Development
+
+Run `node --test tests/*.test.cjs` from the project root. The server prints request logs, caption selection, and classifier results. Inspect the extension's service worker at `chrome://extensions` for scheduling and cache details. The content script does not use ScriptProcessorNode or capture playback audio.

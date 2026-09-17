@@ -1,8 +1,10 @@
+importScripts('timeline.js');
+
 // MV3 service worker: sole owner of chrome.storage.local and the local server calls
 // (both /transcribe and /classify - the only file that talks to localhost:8787).
 // Message contract:
 //   content.js -> here: { type: 'getState', videoId } -> VideoState
-//   content.js -> here: { type: 'transcribeChunk', videoId, chunkRange, pcm, sampleRate }
+//   content.js -> here: { type: 'transcribeChunk', videoId, chunkRange, pcm: base64, sampleRate }
 //                        -> { videoId, chunkRange, sponsorRanges } (via sendResponse, once
 //                           transcription + classification finish - not a push message)
 //   content.js -> here: { type: 'setEnabled', enabled } -> { enabled }
@@ -13,14 +15,11 @@ const PROXY_URL = 'http://localhost:8787/classify';
 const NOUL_THRESHOLD = 0.6; // starting default, tune via testing
 const MERGE_GAP_SECONDS = 15;
 const RANGE_BUFFER_SECONDS = 2;
-const KEYWORD_PREFILTER = [
-  'sponsor', 'sponsored', 'promo', 'promo code', 'discount', 'off your',
-  'use code', 'link in the description', 'link below', 'today\'s video is brought',
-  'brought to you by', 'check out', 'partnered with', 'affiliate'
-];
+const preparedVideos = new Map();
+const videoJobs = new Map();
 
 function storageKey(videoId) {
-  return `ytsb:${videoId}`;
+  return `ytsb:ahead-v1:${videoId}`;
 }
 
 function emptyState(videoId) {
@@ -51,22 +50,14 @@ function mergeChunkRange(processedChunks, [start, end]) {
   return out;
 }
 
-// chunkSize keeps String.fromCharCode within the JS engine's argument-count limit.
-function float32ToBase64(f32) {
-  const bytes = new Uint8Array(f32.buffer, f32.byteOffset, f32.byteLength);
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-  }
-  return btoa(binary);
-}
-
 async function transcribeAudio(pcm, sampleRate, chunkStart) {
+  if (typeof pcm !== 'string' || pcm.length === 0) {
+    throw new Error('expected non-empty base64 PCM; reload the extension and refresh the YouTube tab');
+  }
   const res = await fetch(TRANSCRIBE_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pcm: float32ToBase64(pcm), sampleRate, chunkStart }),
+    body: JSON.stringify({ pcm, sampleRate, chunkStart }),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -74,14 +65,6 @@ async function transcribeAudio(pcm, sampleRate, chunkStart) {
   }
   const data = await res.json();
   return data.segments || [];
-}
-
-// segments with no sponsor vocabulary are dropped before the network round trip.
-function keywordPrefilter(segments) {
-  return segments.filter((seg) => {
-    const text = seg.text.toLowerCase();
-    return KEYWORD_PREFILTER.some((kw) => text.includes(kw));
-  });
 }
 
 async function classifySegments(segments) {
@@ -154,22 +137,85 @@ async function handleChunkProcessed(videoId, chunkRange, segments) {
   const state = await getState(videoId);
   state.processedChunks = mergeChunkRange(state.processedChunks, chunkRange);
 
-  const relevant = keywordPrefilter(segments);
-  if (relevant.length > 0) {
-    const withContext = relevant.map((seg, i) => ({
+  // Brand pitches often have no explicit "sponsor" or "promo code" phrase.
+  // Let the classifier judge all spoken text, using adjacent segments as context.
+  const spoken = segments.filter((seg) => seg.text.trim().length > 0);
+  console.log(`[ytsb] video=${videoId} chunk=[${chunkRange.join(', ')}]: ${spoken.length} non-empty transcript segment(s) for classification`);
+  if (spoken.length === 0) {
+    console.log('[ytsb] skipping /classify because the transcript is empty');
+  }
+  if (spoken.length > 0) {
+    const withContext = spoken.map((seg, i) => ({
       ...seg,
-      context: [relevant[i - 1]?.text, relevant[i + 1]?.text].filter(Boolean).join(' / '),
+      context: seg.context ?? [spoken[i - 1]?.text, spoken[i + 1]?.text].filter(Boolean).join(' / '),
     }));
     const results = await classifySegments(withContext);
-    for (const seg of relevant) {
-      const noul = results[seg.id]?.noul ?? 0;
-      state.candidateSegments.push({ start: seg.start, end: seg.end, text: seg.text, confidence: noul });
+    for (const seg of spoken) {
+      const noul = results[seg.id]?.noul;
+      if (!Number.isFinite(noul) || noul < 0 || noul > 1) throw new Error(`Missing or invalid classifier score for ${seg.id}`);
+      console.log(`[ytsb] segment ${seg.id}: sponsor score=${noul}, threshold=${NOUL_THRESHOLD}, accepted=${noul >= NOUL_THRESHOLD}`);
+      state.candidateSegments = state.candidateSegments.filter((candidate) => candidate.id !== seg.id);
+      state.candidateSegments.push({ id: seg.id, start: seg.start, end: seg.end, text: seg.text, confidence: noul });
     }
   }
 
   state.sponsorRanges = mergeSponsorRanges(state.candidateSegments);
+  console.log(`[ytsb] video=${videoId} sponsor ranges:`, state.sponsorRanges);
   await setState(videoId, state);
   return state;
+}
+
+async function serverRequest(endpoint, body) {
+  const response = await fetch(`http://localhost:8787/${endpoint}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || `${endpoint} failed (${response.status})`);
+  if (response.status === 202 && data.jobId) {
+    const deadline = Date.now() + 5 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const job = await serverRequest('video-job', { jobId: data.jobId });
+      if (!job.pending) return job.result;
+    }
+    throw new Error('Video preparation timed out. Check the server and retry.');
+  }
+  return data;
+}
+
+async function analyzeAhead(videoId, position) {
+  if (!/^[\w-]{11}$/.test(videoId) || !Number.isFinite(position) || position < 0) throw new Error('Invalid video or playback position');
+  let state = await getState(videoId);
+  if (state.duration && ytsbTimeline.checkedEnd(state.processedChunks, position) >= Math.min(state.duration, position + 120)) return state;
+  let prepared = preparedVideos.get(videoId);
+  if (!prepared) {
+    if (preparedVideos.size >= 10) preparedVideos.delete(preparedVideos.keys().next().value);
+    prepared = await serverRequest('prepare-video', { videoId });
+    preparedVideos.set(videoId, prepared);
+  }
+  state = { ...state, duration: prepared.duration, source: prepared.source, language: prepared.language };
+  await setState(videoId, state);
+  const range = ytsbTimeline.nextRange(state.processedChunks, position, prepared.duration, prepared.source === 'captions' ? 60 : 30);
+  if (!range) return state;
+  let segments;
+  if (prepared.source === 'captions') {
+    segments = prepared.segments.flatMap((segment, i, all) => segment.end > range[0] && segment.start < range[1]
+      ? [{ ...segment, context: [all[i - 1]?.text, all[i + 1]?.text].filter(Boolean).join(' / ') }]
+      : []);
+    console.log(`[ytsb] caption analysis video=${videoId} range=[${range}] segments=${segments.length}; Whisper not needed`);
+  } else {
+    ({ segments } = await serverRequest('transcribe-video', { videoId, start: range[0], end: range[1] }));
+  }
+  return handleChunkProcessed(videoId, range, segments);
+}
+
+function queueAnalysis(videoId, position) {
+  // Two tabs of the same video must not overwrite each other's cached ranges.
+  const previous = videoJobs.get(videoId) || Promise.resolve();
+  const job = previous.catch(() => {}).then(() => analyzeAhead(videoId, position));
+  videoJobs.set(videoId, job);
+  job.finally(() => { if (videoJobs.get(videoId) === job) videoJobs.delete(videoId); }).catch(() => {});
+  return job;
 }
 
 function checkedUpTo(processedChunks) {
@@ -195,18 +241,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           enabled,
           sponsorRanges: state.sponsorRanges,
           checkedUpTo: checkedUpTo(state.processedChunks),
+          processedChunks: state.processedChunks,
+          source: state.source,
+          duration: state.duration,
         });
         break;
       }
+      case 'analyzeAhead':
+        sendResponse(await queueAnalysis(msg.videoId, msg.position));
+        break;
       case 'transcribeChunk': {
         console.log(`[ytsb] sending chunk [${msg.chunkRange[0]}s-${msg.chunkRange[1]}s] to local Whisper server`);
-        let segments = [];
-        try {
-          segments = await transcribeAudio(msg.pcm, msg.sampleRate, msg.chunkRange[0]);
-          console.log(`[ytsb] transcribed chunk [${msg.chunkRange[0]}s-${msg.chunkRange[1]}s]: ${segments.length} segment(s)`, segments);
-        } catch (err) {
-          console.error('[ytsb] transcribe failed:', err.message);
-        }
+        const segments = await transcribeAudio(msg.pcm, msg.sampleRate, msg.chunkRange[0]);
+        console.log(`[ytsb] transcribed chunk [${msg.chunkRange[0]}s-${msg.chunkRange[1]}s]: ${segments.length} segment(s)`, segments);
         const state = await handleChunkProcessed(msg.videoId, msg.chunkRange, segments);
         sendResponse({ videoId: msg.videoId, chunkRange: msg.chunkRange, sponsorRanges: state.sponsorRanges });
         break;
@@ -223,6 +270,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       default:
         sendResponse({ error: `unknown message type: ${msg.type}` });
     }
-  })();
+  })().catch((err) => {
+    console.error(`[ytsb] ${msg.type} failed:`, err.message);
+    sendResponse({ error: err.message });
+  });
   return true; // keep the message channel open for the async response
 });
