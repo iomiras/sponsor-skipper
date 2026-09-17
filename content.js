@@ -10,6 +10,14 @@ let video = null;
 let processedUpTo = 0;
 let sponsorRanges = [];
 let skippedThisSession = new Set();
+let enabled = true;
+
+chrome.runtime.sendMessage({ type: 'getEnabled' }, (res) => {
+  if (res) enabled = res.enabled;
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && 'enabled' in changes) enabled = changes.enabled.newValue;
+});
 
 let audioCtx = null;
 let sourceNode = null;
@@ -79,7 +87,7 @@ function setupAudioTap() {
 }
 
 function shouldBeCapturing() {
-  return processedUpTo < video.currentTime + LOOKAHEAD_SECONDS && workerBacklog < MAX_WORKER_BACKLOG;
+  return enabled && processedUpTo < video.currentTime + LOOKAHEAD_SECONDS && workerBacklog < MAX_WORKER_BACKLOG;
 }
 
 function finalizeChunk() {
@@ -109,6 +117,7 @@ function flattenBuffer(chunks) {
 }
 
 function checkSponsorSkip() {
+  if (!enabled) return;
   for (const range of sponsorRanges) {
     const key = `${range.start}-${range.end}`;
     if (video.currentTime >= range.start && video.currentTime < range.end && !skippedThisSession.has(key)) {
