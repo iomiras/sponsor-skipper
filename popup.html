@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Sponsor Skipper</title>
+  <style>
+    body { width: 280px; font: 13px system-ui, sans-serif; padding: 10px; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    #status { color: #666; margin-bottom: 8px; }
+    .range { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #eee; }
+    button { cursor: pointer; }
+    #empty { color: #888; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Sponsor Skipper</strong>
+    <label><input type="checkbox" id="enabledToggle" /> On</label>
+  </header>
+  <div id="status">Checked up to --:--</div>
+  <div id="ranges"></div>
+  <div id="empty">No sponsor segments found yet.</div>
+  <script src="popup.js"></script>
+</body>
+</html>

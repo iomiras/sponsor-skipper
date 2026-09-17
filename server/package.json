@@ -1,0 +1,13 @@
+{
+  "name": "ytsb-classify-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local proxy that holds the TypeSafe API key and batches segment classification for the sponsor skipper extension.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

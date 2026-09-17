@@ -1,0 +1,5 @@
+node_modules/
+*.log
+.agents/
+.claude/
+skills-lock.json
