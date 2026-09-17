@@ -32,10 +32,14 @@ worker.onmessage = (e) => {
   const { type, chunkRange, segments } = e.data;
   if (type !== 'chunkResult') return;
   workerBacklog = Math.max(0, workerBacklog - 1);
+  console.log(`[ytsb] transcribed chunk [${chunkRange[0]}s-${chunkRange[1]}s]: ${segments.length} segment(s)`, segments);
   chrome.runtime.sendMessage(
     { type: 'chunkProcessed', videoId, chunkRange, segments },
     (state) => {
-      if (state) sponsorRanges = state.sponsorRanges;
+      if (state) {
+        sponsorRanges = state.sponsorRanges;
+        console.log('[ytsb] sponsor ranges now:', sponsorRanges);
+      }
     }
   );
 };
@@ -96,6 +100,7 @@ function finalizeChunk() {
   const pcm = flattenBuffer(captureBuffer);
   captureBuffer = [];
   captureStart = end;
+  console.log(`[ytsb] chunk captured [${start}s-${end}s], sending to worker for transcription`);
 
   workerBacklog += 1;
   worker.postMessage(

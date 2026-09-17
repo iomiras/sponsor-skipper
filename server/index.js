@@ -30,6 +30,7 @@ function buildRequestBody(segments) {
 
 async function callTypeSafe(segments) {
   const body = buildRequestBody(segments);
+  console.log(`[proxy] -> Jev: ${segments.length} noul question(s)`, Object.keys(body.questions));
   const maxRetries = 4;
   let attempt = 0;
   while (true) {
@@ -49,9 +50,12 @@ async function callTypeSafe(segments) {
     }
     if (!res.ok) {
       const text = await res.text().catch(() => '');
+      console.error(`[proxy] <- Jev error ${res.status}:`, text);
       throw new Error(`TypeSafe error ${res.status}: ${text}`);
     }
-    return res.json();
+    const json = await res.json();
+    console.log('[proxy] <- Jev answers:', json.answers);
+    return json;
   }
 }
 

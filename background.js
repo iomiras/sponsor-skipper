@@ -60,6 +60,7 @@ async function classifySegments(segments) {
   const body = {
     segments: segments.map((seg) => ({ id: seg.id, text: seg.text, context: seg.context || '' })),
   };
+  console.log(`[ytsb] sending ${segments.length} segment(s) to Jev for classification:`, body.segments);
 
   const maxRetries = 4;
   let attempt = 0;
@@ -72,19 +73,24 @@ async function classifySegments(segments) {
         body: JSON.stringify(body),
       });
     } catch (err) {
+      console.warn(`[ytsb] Jev request failed (attempt ${attempt}):`, err.message);
       if (attempt >= maxRetries) throw err;
       await backoff(attempt++);
       continue;
     }
     if (res.status === 429 || res.status === 529) {
+      console.warn(`[ytsb] Jev proxy overloaded (${res.status}), retrying...`);
       if (attempt >= maxRetries) throw new Error(`proxy overloaded: ${res.status}`);
       await backoff(attempt++);
       continue;
     }
     if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      console.error(`[ytsb] Jev proxy error ${res.status}:`, text);
       throw new Error(`proxy error: ${res.status}`);
     }
     const data = await res.json();
+    console.log('[ytsb] Jev response:', data.results);
     return data.results || {};
   }
 }

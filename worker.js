@@ -7,11 +7,20 @@ env.allowLocalModels = false;
 let transcriberPromise = null;
 function getTranscriber() {
   if (!transcriberPromise) {
+    console.log('[ytsb] loading Whisper tiny.en (webgpu, falls back to wasm)...');
     transcriberPromise = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
       device: 'webgpu',
-    }).catch(() =>
-      pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', { device: 'wasm' })
-    );
+    })
+      .then((t) => {
+        console.log('[ytsb] Whisper loaded on webgpu');
+        return t;
+      })
+      .catch(() =>
+        pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', { device: 'wasm' }).then((t) => {
+          console.log('[ytsb] Whisper loaded on wasm');
+          return t;
+        })
+      );
   }
   return transcriberPromise;
 }
@@ -20,6 +29,7 @@ self.onmessage = async (e) => {
   const { type, videoId, chunkRange, pcm, sampleRate } = e.data;
   if (type !== 'transcribeChunk') return;
 
+  console.log(`[ytsb] transcribing chunk [${chunkRange[0]}s-${chunkRange[1]}s]...`);
   const transcriber = await getTranscriber();
   const [chunkStart] = chunkRange;
 
@@ -30,6 +40,7 @@ self.onmessage = async (e) => {
   });
 
   const segments = groupIntoSegments(result, chunkStart);
+  console.log(`[ytsb] chunk [${chunkRange[0]}s-${chunkRange[1]}s] done: "${result.text}"`);
   self.postMessage({ type: 'chunkResult', videoId, chunkRange, segments });
 };
 
