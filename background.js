@@ -1,9 +1,32 @@
-// MV3 service worker: sole owner of chrome.storage.local and the proxy fetch.
+// MV3 service worker: sole owner of chrome.storage.local, the proxy fetch,
+// and the offscreen document that runs the transcription Worker.
 // Message contract:
-//   { type: 'getState', videoId } -> VideoState
-//   { type: 'chunkProcessed', videoId, chunkRange: [start,end], segments } -> VideoState
-//   { type: 'setEnabled', enabled } -> { enabled }
-//   { type: 'getEnabled' } -> { enabled }
+//   content.js -> here:      { type: 'getState', videoId } -> VideoState
+//   content.js -> here:      { type: 'transcribeChunk', videoId, chunkRange, pcm, sampleRate }
+//   here -> offscreen.js:    { type: 'runTranscribe', videoId, chunkRange, pcm, sampleRate }
+//   offscreen.js -> here:    { type: 'transcribeResult', videoId, chunkRange, segments }
+//   here -> content.js:      { type: 'chunkResult', videoId, chunkRange, sponsorRanges }
+//   content.js -> here:      { type: 'setEnabled', enabled } -> { enabled }
+//   content.js -> here:      { type: 'getEnabled' } -> { enabled }
+
+let offscreenReady = null;
+async function ensureOffscreenDocument() {
+  if (!offscreenReady) {
+    offscreenReady = (async () => {
+      const existing = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+      if (existing.length > 0) return;
+      await chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: ['WORKERS'],
+        justification: 'runs Whisper transcription in a Worker, outside youtube.com\'s CSP',
+      });
+    })();
+  }
+  return offscreenReady;
+}
+
+// keyed `${videoId}:${chunkStart}`, since the offscreen doc is a singleton shared across tabs.
+const pendingChunks = new Map();
 
 const PROXY_URL = 'http://localhost:8787/classify';
 const NOUL_THRESHOLD = 0.6; // starting default, tune via testing
@@ -169,9 +192,35 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
         break;
       }
-      case 'chunkProcessed':
-        sendResponse(await handleChunkProcessed(msg.videoId, msg.chunkRange, msg.segments));
+      case 'transcribeChunk': {
+        await ensureOffscreenDocument();
+        pendingChunks.set(`${msg.videoId}:${msg.chunkRange[0]}`, sender.tab.id);
+        console.log(`[ytsb] relaying chunk [${msg.chunkRange[0]}s-${msg.chunkRange[1]}s] to offscreen worker`);
+        chrome.runtime.sendMessage({
+          type: 'runTranscribe',
+          videoId: msg.videoId,
+          chunkRange: msg.chunkRange,
+          pcm: msg.pcm,
+          sampleRate: msg.sampleRate,
+        });
+        sendResponse({ ok: true });
         break;
+      }
+      case 'transcribeResult': {
+        const key = `${msg.videoId}:${msg.chunkRange[0]}`;
+        const tabId = pendingChunks.get(key);
+        pendingChunks.delete(key);
+        const state = await handleChunkProcessed(msg.videoId, msg.chunkRange, msg.segments);
+        if (tabId != null) {
+          chrome.tabs.sendMessage(tabId, {
+            type: 'chunkResult',
+            videoId: msg.videoId,
+            chunkRange: msg.chunkRange,
+            sponsorRanges: state.sponsorRanges,
+          });
+        }
+        break;
+      }
       case 'setEnabled':
         await chrome.storage.local.set({ enabled: msg.enabled });
         sendResponse({ enabled: msg.enabled });
