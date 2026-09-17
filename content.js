@@ -73,14 +73,42 @@ function setupAudioTap() {
   captureStart = video.currentTime;
   captureBuffer = [];
 
+  console.log(`[ytsb] audio tap built, context ${audioCtx.state} @ ${audioCtx.sampleRate}Hz`);
+  // a context created outside a user gesture starts suspended, and a suspended
+  // context never fires onaudioprocess.
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume().then(
+      () => console.log('[ytsb] context resumed:', audioCtx.state),
+      (err) => console.warn('[ytsb] context resume rejected, waiting for a click:', err.message)
+    );
+    document.addEventListener('click', () => audioCtx.resume(), { once: true });
+  }
+
+  let sawAudio = false;
+  let loggedSeconds = 0;
   captureNode.onaudioprocess = (e) => {
+    if (!sawAudio) {
+      sawAudio = true;
+      console.log('[ytsb] onaudioprocess firing, audio is flowing');
+    }
     if (video.paused) return;
-    if (!shouldBeCapturing()) return;
+    if (!shouldBeCapturing()) {
+      if (loggedSeconds !== -1) {
+        console.log(`[ytsb] capture gated off: enabled=${enabled} processedUpTo=${processedUpTo.toFixed(0)} currentTime=${video.currentTime.toFixed(0)} backlog=${workerBacklog}`);
+        loggedSeconds = -1;
+      }
+      return;
+    }
     captureBuffer.push(new Float32Array(e.inputBuffer.getChannelData(0)));
 
     const capturedSeconds = captureBuffer.length * 4096 / audioCtx.sampleRate;
+    if (capturedSeconds - loggedSeconds >= 10) {
+      loggedSeconds = capturedSeconds;
+      console.log(`[ytsb] buffering audio: ${capturedSeconds.toFixed(0)}s / ${CHUNK_SECONDS}s`);
+    }
     if (capturedSeconds >= CHUNK_SECONDS) {
       finalizeChunk();
+      loggedSeconds = 0;
     }
   };
 }
