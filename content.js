@@ -84,33 +84,36 @@ function setupAudioTap() {
     document.addEventListener('click', () => audioCtx.resume(), { once: true });
   }
 
-  let sawAudio = false;
-  let loggedSeconds = 0;
+  let peak = 0;
+  let callbacks = 0;
   captureNode.onaudioprocess = (e) => {
-    if (!sawAudio) {
-      sawAudio = true;
-      console.log('[ytsb] onaudioprocess firing, audio is flowing');
+    callbacks += 1;
+    const samples = e.inputBuffer.getChannelData(0);
+    for (let i = 0; i < samples.length; i += 64) {
+      const level = Math.abs(samples[i]);
+      if (level > peak) peak = level;
     }
     if (video.paused) return;
-    if (!shouldBeCapturing()) {
-      if (loggedSeconds !== -1) {
-        console.log(`[ytsb] capture gated off: enabled=${enabled} processedUpTo=${processedUpTo.toFixed(0)} currentTime=${video.currentTime.toFixed(0)} backlog=${workerBacklog}`);
-        loggedSeconds = -1;
-      }
-      return;
-    }
-    captureBuffer.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    if (!shouldBeCapturing()) return;
+    captureBuffer.push(new Float32Array(samples));
 
-    const capturedSeconds = captureBuffer.length * 4096 / audioCtx.sampleRate;
-    if (capturedSeconds - loggedSeconds >= 10) {
-      loggedSeconds = capturedSeconds;
-      console.log(`[ytsb] buffering audio: ${capturedSeconds.toFixed(0)}s / ${CHUNK_SECONDS}s`);
-    }
-    if (capturedSeconds >= CHUNK_SECONDS) {
+    if (captureBuffer.length * 4096 / audioCtx.sampleRate >= CHUNK_SECONDS) {
       finalizeChunk();
-      loggedSeconds = 0;
     }
   };
+
+  // one line carrying every variable that can stall capture, so a stall is
+  // diagnosable from a single log rather than by elimination.
+  setInterval(() => {
+    const buffered = captureBuffer.length * 4096 / audioCtx.sampleRate;
+    console.log(
+      `[ytsb] tap: ctx=${audioCtx.state} paused=${video.paused} readyState=${video.readyState}` +
+      ` buffered=${buffered.toFixed(1)}s/${CHUNK_SECONDS}s peak=${peak.toFixed(4)} cbs=${callbacks}` +
+      ` t=${video.currentTime.toFixed(0)} processedUpTo=${processedUpTo.toFixed(0)} backlog=${workerBacklog} enabled=${enabled}`
+    );
+    peak = 0;
+    callbacks = 0;
+  }, 5000);
 }
 
 function shouldBeCapturing() {
