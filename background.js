@@ -1,33 +1,14 @@
-// MV3 service worker: sole owner of chrome.storage.local, the proxy fetch,
-// and the offscreen document that runs the transcription Worker.
+// MV3 service worker: sole owner of chrome.storage.local and the local server calls
+// (both /transcribe and /classify - the only file that talks to localhost:8787).
 // Message contract:
-//   content.js -> here:      { type: 'getState', videoId } -> VideoState
-//   content.js -> here:      { type: 'transcribeChunk', videoId, chunkRange, pcm, sampleRate }
-//   here -> offscreen.js:    { type: 'runTranscribe', videoId, chunkRange, pcm, sampleRate }
-//   offscreen.js -> here:    { type: 'transcribeResult', videoId, chunkRange, segments }
-//   here -> content.js:      { type: 'chunkResult', videoId, chunkRange, sponsorRanges }
-//   content.js -> here:      { type: 'setEnabled', enabled } -> { enabled }
-//   content.js -> here:      { type: 'getEnabled' } -> { enabled }
+//   content.js -> here: { type: 'getState', videoId } -> VideoState
+//   content.js -> here: { type: 'transcribeChunk', videoId, chunkRange, pcm, sampleRate }
+//                        -> { videoId, chunkRange, sponsorRanges } (via sendResponse, once
+//                           transcription + classification finish - not a push message)
+//   content.js -> here: { type: 'setEnabled', enabled } -> { enabled }
+//   content.js -> here: { type: 'getEnabled' } -> { enabled }
 
-let offscreenReady = null;
-async function ensureOffscreenDocument() {
-  if (!offscreenReady) {
-    offscreenReady = (async () => {
-      const existing = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
-      if (existing.length > 0) return;
-      await chrome.offscreen.createDocument({
-        url: 'offscreen.html',
-        reasons: ['WORKERS'],
-        justification: 'runs Whisper transcription in a Worker, outside youtube.com\'s CSP',
-      });
-    })();
-  }
-  return offscreenReady;
-}
-
-// keyed `${videoId}:${chunkStart}`, since the offscreen doc is a singleton shared across tabs.
-const pendingChunks = new Map();
-
+const TRANSCRIBE_URL = 'http://localhost:8787/transcribe';
 const PROXY_URL = 'http://localhost:8787/classify';
 const NOUL_THRESHOLD = 0.6; // starting default, tune via testing
 const MERGE_GAP_SECONDS = 15;
@@ -68,6 +49,31 @@ function mergeChunkRange(processedChunks, [start, end]) {
     }
   }
   return out;
+}
+
+// chunkSize keeps String.fromCharCode within the JS engine's argument-count limit.
+function float32ToBase64(f32) {
+  const bytes = new Uint8Array(f32.buffer, f32.byteOffset, f32.byteLength);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function transcribeAudio(pcm, sampleRate, chunkStart) {
+  const res = await fetch(TRANSCRIBE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pcm: float32ToBase64(pcm), sampleRate, chunkStart }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`transcribe server error ${res.status}: ${text}`);
+  }
+  const data = await res.json();
+  return data.segments || [];
 }
 
 // segments with no sponsor vocabulary are dropped before the network round trip.
@@ -193,32 +199,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       }
       case 'transcribeChunk': {
-        await ensureOffscreenDocument();
-        pendingChunks.set(`${msg.videoId}:${msg.chunkRange[0]}`, sender.tab.id);
-        console.log(`[ytsb] relaying chunk [${msg.chunkRange[0]}s-${msg.chunkRange[1]}s] to offscreen worker`);
-        chrome.runtime.sendMessage({
-          type: 'runTranscribe',
-          videoId: msg.videoId,
-          chunkRange: msg.chunkRange,
-          pcm: msg.pcm,
-          sampleRate: msg.sampleRate,
-        });
-        sendResponse({ ok: true });
-        break;
-      }
-      case 'transcribeResult': {
-        const key = `${msg.videoId}:${msg.chunkRange[0]}`;
-        const tabId = pendingChunks.get(key);
-        pendingChunks.delete(key);
-        const state = await handleChunkProcessed(msg.videoId, msg.chunkRange, msg.segments);
-        if (tabId != null) {
-          chrome.tabs.sendMessage(tabId, {
-            type: 'chunkResult',
-            videoId: msg.videoId,
-            chunkRange: msg.chunkRange,
-            sponsorRanges: state.sponsorRanges,
-          });
+        console.log(`[ytsb] sending chunk [${msg.chunkRange[0]}s-${msg.chunkRange[1]}s] to local Whisper server`);
+        let segments = [];
+        try {
+          segments = await transcribeAudio(msg.pcm, msg.sampleRate, msg.chunkRange[0]);
+          console.log(`[ytsb] transcribed chunk [${msg.chunkRange[0]}s-${msg.chunkRange[1]}s]: ${segments.length} segment(s)`, segments);
+        } catch (err) {
+          console.error('[ytsb] transcribe failed:', err.message);
         }
+        const state = await handleChunkProcessed(msg.videoId, msg.chunkRange, segments);
+        sendResponse({ videoId: msg.videoId, chunkRange: msg.chunkRange, sponsorRanges: state.sponsorRanges });
         break;
       }
       case 'setEnabled':

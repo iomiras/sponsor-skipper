@@ -3,7 +3,7 @@
   "name": "YouTube Sponsor Segment Skipper",
   "version": "0.1.0",
   "description": "Auto-skips creator-inserted sponsor reads in YouTube videos using on-device speech-to-text and AI classification. Does not touch YouTube's own ads.",
-  "permissions": ["storage", "tabs", "offscreen"],
+  "permissions": ["storage", "tabs"],
   "host_permissions": ["*://*.youtube.com/*"],
   "background": {
     "service_worker": "background.js"

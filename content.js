@@ -1,7 +1,8 @@
-// Content script world. Transcription itself runs in an offscreen document
-// (see background.js/offscreen.js), not here: youtube.com's CSP has no
-// worker-src directive and falls back to script-src, which blocks a Worker
-// constructed from this page regardless of chrome-extension:// or blob: URL.
+// Content script world. Transcription runs server-side (background.js posts
+// audio to the local server), not in-page: youtube.com's CSP has no
+// worker-src directive and falls back to script-src, which blocked every
+// in-browser attempt at running a Worker here (chrome-extension:// URL, blob:
+// URL, and an offscreen document all hit this before the move to the server).
 
 console.log('[ytsb] content.js loaded');
 
@@ -97,13 +98,15 @@ function finalizeChunk() {
   console.log(`[ytsb] chunk captured [${start}s-${end}s], sending for transcription`);
 
   workerBacklog += 1;
-  chrome.runtime.sendMessage({
-    type: 'transcribeChunk',
-    videoId,
-    chunkRange: [start, end],
-    pcm,
-    sampleRate: audioCtx.sampleRate,
-  });
+  chrome.runtime.sendMessage(
+    { type: 'transcribeChunk', videoId, chunkRange: [start, end], pcm, sampleRate: audioCtx.sampleRate },
+    (res) => {
+      workerBacklog = Math.max(0, workerBacklog - 1);
+      if (!res || res.videoId !== videoId) return; // stale response after navigating to a different video
+      sponsorRanges = res.sponsorRanges;
+      console.log(`[ytsb] chunk [${res.chunkRange[0]}s-${res.chunkRange[1]}s] classified, sponsor ranges now:`, sponsorRanges);
+    }
+  );
   processedUpTo = Math.max(processedUpTo, end);
 }
 
@@ -182,11 +185,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === 'getCurrentVideoId') {
     sendResponse({ videoId });
-  }
-  if (msg.type === 'chunkResult' && msg.videoId === videoId) {
-    workerBacklog = Math.max(0, workerBacklog - 1);
-    sponsorRanges = msg.sponsorRanges;
-    console.log(`[ytsb] chunk [${msg.chunkRange[0]}s-${msg.chunkRange[1]}s] classified, sponsor ranges now:`, sponsorRanges);
   }
 });
 

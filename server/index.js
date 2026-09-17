@@ -1,4 +1,5 @@
 const http = require('http');
+const { transcribeChunk } = require('./transcribe');
 
 const PORT = process.env.PORT || 8787;
 const TYPESAFE_API_KEY = process.env.TYPESAFE_API_KEY;
@@ -67,41 +68,84 @@ function mapResults(answers) {
   return results;
 }
 
-const server = http.createServer((req, res) => {
-  if (req.method !== 'POST' || req.url !== '/classify') {
-    sendJson(res, 404, { error: 'not found' });
-    return;
-  }
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => (body += chunk));
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        reject(new Error('invalid JSON body'));
+      }
+    });
+  });
+}
 
+async function handleClassify(req, res) {
   if (!TYPESAFE_API_KEY) {
     sendJson(res, 500, { error: 'TYPESAFE_API_KEY is not set on the server' });
     return;
   }
 
-  let body = '';
-  req.on('data', (chunk) => (body += chunk));
-  req.on('end', async () => {
-    let parsed;
-    try {
-      parsed = JSON.parse(body);
-    } catch {
-      sendJson(res, 400, { error: 'invalid JSON body' });
-      return;
-    }
+  let parsed;
+  try {
+    parsed = await readBody(req);
+  } catch (err) {
+    sendJson(res, 400, { error: err.message });
+    return;
+  }
 
-    const segments = parsed.segments;
-    if (!Array.isArray(segments) || segments.length === 0) {
-      sendJson(res, 400, { error: 'segments must be a non-empty array' });
-      return;
-    }
+  const segments = parsed.segments;
+  if (!Array.isArray(segments) || segments.length === 0) {
+    sendJson(res, 400, { error: 'segments must be a non-empty array' });
+    return;
+  }
 
-    try {
-      const typesafeResp = await callTypeSafe(segments);
-      sendJson(res, 200, { results: mapResults(typesafeResp.answers) });
-    } catch (err) {
-      sendJson(res, 502, { error: err.message });
-    }
-  });
+  try {
+    const typesafeResp = await callTypeSafe(segments);
+    sendJson(res, 200, { results: mapResults(typesafeResp.answers) });
+  } catch (err) {
+    sendJson(res, 502, { error: err.message });
+  }
+}
+
+async function handleTranscribe(req, res) {
+  let parsed;
+  try {
+    parsed = await readBody(req);
+  } catch (err) {
+    sendJson(res, 400, { error: err.message });
+    return;
+  }
+
+  const { pcm, sampleRate, chunkStart } = parsed;
+  if (typeof pcm !== 'string' || typeof sampleRate !== 'number' || typeof chunkStart !== 'number') {
+    sendJson(res, 400, { error: 'expected { pcm: base64 string, sampleRate: number, chunkStart: number }' });
+    return;
+  }
+
+  try {
+    const segments = await transcribeChunk(pcm, sampleRate, chunkStart);
+    sendJson(res, 200, { segments });
+  } catch (err) {
+    console.error('[transcribe] failed:', err.message, err);
+    sendJson(res, 502, { error: err.message });
+  }
+}
+
+const server = http.createServer((req, res) => {
+  if (req.method !== 'POST') {
+    sendJson(res, 404, { error: 'not found' });
+    return;
+  }
+  if (req.url === '/classify') {
+    handleClassify(req, res);
+  } else if (req.url === '/transcribe') {
+    handleTranscribe(req, res);
+  } else {
+    sendJson(res, 404, { error: 'not found' });
+  }
 });
 
 server.listen(PORT, () => {

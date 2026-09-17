@@ -1,10 +1,10 @@
 # YouTube Sponsor Segment Skipper
 
-A Chrome MV3 extension that auto-skips creator-inserted sponsor reads in YouTube videos. It transcribes audio on-device with Whisper (via Transformers.js) and classifies each transcript segment with TypeSafe's Jev models. It does not touch YouTube's own inserted ads; those are a DOM signal, out of scope here.
+A Chrome MV3 extension that auto-skips creator-inserted sponsor reads in YouTube videos. It transcribes audio locally with Whisper (via Transformers.js, running in a small local server) and classifies each transcript segment with TypeSafe's Jev models. It does not touch YouTube's own inserted ads; those are a DOM signal, out of scope here.
 
 ## Install
 
-1. Start the classify proxy: see `server/README.md` (`cd server && npm install && export TYPESAFE_API_KEY=... && npm start`).
+1. Start the local server: see `server/README.md` (`cd server && npm install && export TYPESAFE_API_KEY=... && npm start`). This also downloads the Whisper model (~75MB) on its first request.
 2. Open `chrome://extensions`, enable Developer Mode, click "Load unpacked", and select this project's root directory.
 3. Open a YouTube video. The extension transcribes upcoming audio in the background and skips ranges it classifies as sponsor reads.
 4. Click the extension icon to toggle it on/off, see how far the current video has been checked, and manually skip a detected range.
@@ -18,7 +18,6 @@ A Chrome MV3 extension that auto-skips creator-inserted sponsor reads in YouTube
 
 ## Architecture notes
 
-- `background.js` is the only file allowed to fetch the local proxy, and it is the only file that touches `chrome.storage.local`; `content.js` and `popup.js` read and write state through its message handlers.
-- The Web Worker in `worker.js` is spawned from `offscreen.js`, an offscreen document that `background.js` creates, not directly from `content.js`. youtube.com's CSP has no `worker-src` directive and falls back to `script-src`, which blocks a Worker built from the content script (`chrome-extension://` and `blob:` URLs both fail); an offscreen document runs in the extension's own origin and is not subject to the host page's CSP. `content.js` sends captured audio to `background.js`, which relays it to the offscreen document and routes the result back to the originating tab.
+- `background.js` is the only file that talks to the local server (both `/transcribe` and `/classify`), and it is the only file that touches `chrome.storage.local`; `content.js` and `popup.js` read and write state through its message handlers.
+- Whisper runs inside `server/transcribe.js`, a Node process, not inside the browser. It started as a browser-side Web Worker, but youtube.com's CSP has no `worker-src` directive and falls back to `script-src`, which blocked every in-page attempt (a Worker built from `chrome-extension://`, from a `blob:` URL, and even from an offscreen document all hit some form of this). Moving it to a local Node server sidesteps every browser-specific restriction. It is still fully local: the server only ever binds to `localhost`, so audio never leaves the machine, it just moves from the browser tab to a local Node process.
 - Audio is captured by tapping the video element's live playback (`MediaElementAudioSourceNode` plus a `ScriptProcessorNode`), so transcription trails playback by roughly one chunk rather than running arbitrarily far ahead; the `LOOKAHEAD_SECONDS` window governs when capture is active and when the popup reports content as checked, not a true prefetch of unplayed audio.
-- `worker.js` imports `@xenova/transformers` from a CDN URL for simplicity. A Chrome Web Store submission should instead vendor the library locally, since the store's policy discourages remotely hosted code; an unpacked/dev load works as shipped.
