@@ -11,10 +11,14 @@
   "content_scripts": [
     {
       "matches": ["*://www.youtube.com/*"],
-      "js": ["timeline.js", "content.js"],
+      "js": ["timeline.js", "settings.js", "content.js"],
       "run_at": "document_start"
     }
   ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
   "action": {
     "default_popup": "popup.html",
     "default_icon": {

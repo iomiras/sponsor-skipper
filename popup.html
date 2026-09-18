@@ -10,6 +10,8 @@
     .range { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #eee; }
     button { cursor: pointer; }
     #empty { color: #888; }
+    footer { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; color: #666; }
+    #mode { font-size: 12px; }
   </style>
 </head>
 <body>
@@ -20,7 +22,12 @@
   <div id="status">Analyzing in the background…</div>
   <div id="ranges"></div>
   <div id="empty">No sponsor segments found yet.</div>
+  <footer>
+    <span id="mode"></span>
+    <button id="openSettings">Settings</button>
+  </footer>
   <script src="timeline.js"></script>
+  <script src="settings.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

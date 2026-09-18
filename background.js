@@ -1,4 +1,4 @@
-importScripts('timeline.js');
+importScripts('timeline.js', 'settings.js');
 
 // MV3 service worker: sole owner of chrome.storage.local and the local server calls
 // (both /transcribe and /classify - the only file that talks to localhost:8787).
@@ -7,8 +7,8 @@ importScripts('timeline.js');
 //   content.js -> here: { type: 'transcribeChunk', videoId, chunkRange, pcm: base64, sampleRate }
 //                        -> { videoId, chunkRange, sponsorRanges } (via sendResponse, once
 //                           transcription + classification finish - not a push message)
-//   content.js -> here: { type: 'setEnabled', enabled } -> { enabled }
-//   content.js -> here: { type: 'getEnabled' } -> { enabled }
+//   any page    -> here: { type: 'getSettings' } -> Settings
+//   any page    -> here: { type: 'setSettings', settings } -> merged Settings
 
 const TRANSCRIBE_URL = 'http://localhost:8787/transcribe';
 const PROXY_URL = 'http://localhost:8787/classify';
@@ -42,6 +42,11 @@ async function getState(videoId) {
 
 async function setState(videoId, state) {
   await chrome.storage.local.set({ [storageKey(videoId)]: state });
+}
+
+async function getSettings() {
+  const stored = await chrome.storage.local.get(ytsbSettings.SETTINGS_KEY);
+  return ytsbSettings.normalize(stored[ytsbSettings.SETTINGS_KEY]);
 }
 
 function mergeChunkRange(processedChunks, [start, end]) {
@@ -372,9 +377,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         break;
       case 'getPopupInfo': {
         const state = await getState(msg.videoId);
-        const { enabled = true } = await chrome.storage.local.get('enabled');
         sendResponse({
-          enabled,
+          settings: await getSettings(),
           sponsorRanges: state.sponsorRanges,
           checkedUpTo: checkedUpTo(state.processedChunks),
           processedChunks: state.processedChunks,
@@ -394,13 +398,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ videoId: msg.videoId, chunkRange: msg.chunkRange, sponsorRanges: state.sponsorRanges });
         break;
       }
-      case 'setEnabled':
-        await chrome.storage.local.set({ enabled: msg.enabled });
-        sendResponse({ enabled: msg.enabled });
+      case 'getSettings':
+        sendResponse(await getSettings());
         break;
-      case 'getEnabled': {
-        const { enabled = true } = await chrome.storage.local.get('enabled');
-        sendResponse({ enabled });
+      case 'setSettings': {
+        // Merged, so a page that only knows about one field cannot drop the rest.
+        const next = ytsbSettings.normalize({ ...(await getSettings()), ...msg.settings });
+        await chrome.storage.local.set({ [ytsbSettings.SETTINGS_KEY]: next });
+        sendResponse(next);
         break;
       }
       default:

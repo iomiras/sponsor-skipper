@@ -5,7 +5,8 @@ const LOOKAHEAD_SECONDS = 120;
 let videoId = null;
 let video = null;
 let state = { processedChunks: [], sponsorRanges: [] };
-let enabled = true;
+let settings = ytsbSettings.normalize(null);
+let skipButton = null;
 let generation = 0;
 let busy = false;
 let error = '';
@@ -26,14 +27,54 @@ function isYouTubeAd() {
   return Boolean(document.querySelector('#movie_player.ad-showing, #movie_player.ad-interrupting'));
 }
 
-function reconcilePlayback() {
-  if (!video || !videoId || !enabled || isYouTubeAd()) return;
-  const time = video.currentTime;
-  const target = Math.min(state.duration || Infinity, ytsbTimeline.skipTarget(state.sponsorRanges, time));
-  if (target > time) {
-    console.log(`[ytsb] skipping detected sponsor [${time.toFixed(2)}s-${target.toFixed(2)}s]`);
-    video.currentTime = target;
+// Built on demand: in auto mode the player is never touched, which keeps the
+// overlay out of the way of anyone who just wants the skip to happen.
+function showSkipButton(target) {
+  if (!skipButton) {
+    skipButton = document.createElement('button');
+    skipButton.id = 'ytsb-skip-button';
+    skipButton.textContent = 'Skip sponsor';
+    skipButton.style.cssText = [
+      'position:absolute', 'right:12px', 'bottom:70px', 'z-index:2000',
+      'padding:8px 16px', 'font:500 13px/1 Roboto,system-ui,sans-serif',
+      'color:#fff', 'background:rgba(0,0,0,.75)', 'border:1px solid rgba(255,255,255,.4)',
+      'border-radius:2px', 'cursor:pointer',
+    ].join(';');
+    skipButton.addEventListener('click', () => {
+      const to = Number(skipButton.dataset.target);
+      console.log(`[ytsb] manual skip to ${to.toFixed(2)}s`);
+      video.currentTime = to;
+      hideSkipButton();
+    });
   }
+  skipButton.dataset.target = String(target);
+  const host = document.querySelector('#movie_player');
+  if (host && skipButton.parentElement !== host) host.appendChild(skipButton);
+  skipButton.hidden = false;
+}
+
+function hideSkipButton() {
+  if (skipButton) skipButton.hidden = true;
+}
+
+function reconcilePlayback() {
+  if (!video || !videoId || !settings.enabled || isYouTubeAd()) {
+    hideSkipButton();
+    return;
+  }
+  const time = video.currentTime;
+  const ranges = ytsbSettings.actionableRanges(state.sponsorRanges, settings);
+  const target = Math.min(state.duration || Infinity, ytsbTimeline.skipTarget(ranges, time));
+  if (target <= time) {
+    hideSkipButton();
+    return;
+  }
+  if (settings.skipMode === 'manual') {
+    showSkipButton(target);
+    return;
+  }
+  console.log(`[ytsb] skipping detected sponsor [${time.toFixed(2)}s-${target.toFixed(2)}s]`);
+  video.currentTime = target;
 }
 
 function resetVideo(id) {
@@ -69,7 +110,7 @@ function tick() {
   if (element && element !== video) attachVideo(element);
   if (!id || !video) return;
   reconcilePlayback();
-  if (!enabled || busy || Date.now() < retryAt || isYouTubeAd() || video.seeking) return;
+  if (!settings.enabled || busy || Date.now() < retryAt || isYouTubeAd() || video.seeking) return;
   const position = video.currentTime;
   if (state.duration && ytsbTimeline.checkedEnd(state.processedChunks, position) >= Math.min(state.duration, position + LOOKAHEAD_SECONDS)) return;
   busy = true;
@@ -98,8 +139,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'getPlaybackStatus') sendResponse({ videoId, position: video?.currentTime || 0, analyzing: busy, error, source: state.source });
 });
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes.enabled) { enabled = changes.enabled.newValue; tick(); }
+  const change = area === 'local' && changes[ytsbSettings.SETTINGS_KEY];
+  if (change) { settings = ytsbSettings.normalize(change.newValue); tick(); }
 });
-message({ type: 'getEnabled' }).then((result) => { enabled = result.enabled; tick(); }).catch((err) => { error = err.message; });
+message({ type: 'getSettings' }).then((result) => { settings = ytsbSettings.normalize(result); tick(); }).catch((err) => { error = err.message; });
 document.addEventListener('yt-navigate-finish', tick);
 setInterval(tick, 250);

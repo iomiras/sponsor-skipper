@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Sponsor Skipper settings</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { width: 380px; margin: 0; padding: 18px; font: 13px/1.5 system-ui, sans-serif; }
+    h1 { font-size: 15px; margin: 0 0 14px; }
+    fieldset { border: 1px solid rgba(128, 128, 128, .35); border-radius: 6px; margin: 0 0 14px; padding: 12px 14px; }
+    legend { padding: 0 4px; font-weight: 600; }
+    label { display: block; margin: 6px 0; }
+    .hint { color: #777; margin: 2px 0 0 22px; }
+    input[type="number"] { width: 4em; }
+    footer { display: flex; align-items: center; gap: 10px; }
+    #saved { color: #1a7f37; opacity: 0; transition: opacity .15s; }
+    #saved.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <h1>Sponsor Skipper settings</h1>
+
+  <fieldset>
+    <legend>Sponsor segments</legend>
+    <label><input type="checkbox" id="enabled" /> Detect sponsor segments</label>
+    <p class="hint">Turn off to stop analysis and skipping entirely.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>When a sponsor is reached</legend>
+    <label><input type="radio" name="skipMode" value="auto" /> Skip it automatically</label>
+    <p class="hint">Playback jumps past the segment with no interaction.</p>
+    <label><input type="radio" name="skipMode" value="manual" /> Show a “Skip sponsor” button</label>
+    <p class="hint">A button appears on the player, like YouTube's own skip button. Nothing is skipped unless you click it.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Limits</legend>
+    <label>Ignore segments shorter than <input type="number" id="minSkipSeconds" min="0" max="60" step="1" /> seconds</label>
+    <p class="hint">Very short detections are usually false positives, and skipping them is more jarring than watching them.</p>
+  </fieldset>
+
+  <footer>
+    <button id="reset">Reset to defaults</button>
+    <span id="saved">Saved</span>
+  </footer>
+
+  <script src="settings.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

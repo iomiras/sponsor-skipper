@@ -9,9 +9,19 @@ async function main() {
   const status = document.getElementById('status');
   const rangesEl = document.getElementById('ranges');
   const emptyEl = document.getElementById('empty');
-  const { enabled } = await chrome.runtime.sendMessage({ type: 'getEnabled' });
-  toggle.checked = enabled;
-  toggle.addEventListener('change', () => chrome.runtime.sendMessage({ type: 'setEnabled', enabled: toggle.checked }));
+  const modeEl = document.getElementById('mode');
+  document.getElementById('openSettings').addEventListener('click', () => chrome.runtime.openOptionsPage());
+
+  let settings = await chrome.runtime.sendMessage({ type: 'getSettings' });
+  const showSettings = () => {
+    toggle.checked = settings.enabled;
+    modeEl.textContent = settings.skipMode === 'manual' ? 'Manual: shows a skip button' : 'Skipping automatically';
+  };
+  showSettings();
+  toggle.addEventListener('change', async () => {
+    settings = await chrome.runtime.sendMessage({ type: 'setSettings', settings: { enabled: toggle.checked } });
+    showSettings();
+  });
   if (!videoId) { status.textContent = 'Not on a video page.'; return; }
 
   async function refresh() {
