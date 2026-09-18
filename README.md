@@ -18,8 +18,8 @@ After any code change, restart the server, reload the extension, and refresh You
 - For videos without usable captions, downloads 30-second audio slices independently of the player, then transcribes locally with Whisper.
 - Playback continues while analysis runs, including after seeking into unchecked content. A newly detected sponsor is skipped immediately if playback is already inside it. There is no preparation overlay or automatic pause/resume.
 - Caches completed classifications in extension storage. Concurrent tabs of the same video serialize updates. Old live-capture cache entries are ignored.
-- The popup shows the source, seconds checked ahead, and detected ranges. Failed analysis retries after 30 seconds without interrupting playback.
-- Automatic skipping is the default. Use **Use manual button** in the popup (or choose the manual mode in Settings) to show the on-player button; it appears only while playback is inside a detected sponsor range.
+- The popup shows whether analysis is ready, how far ahead it has checked, and detected ranges. Failed analysis retries after 30 seconds without interrupting playback.
+- Automatic skipping is the default. Turn off **Skip automatically** in the popup (or choose **Ask me first** in Settings) to show the on-player button while playback is inside a detected sponsor range.
 
 ## Limitations
 

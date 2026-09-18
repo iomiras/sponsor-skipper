@@ -4,29 +4,76 @@
   <meta charset="utf-8" />
   <title>Sponsor Skipper</title>
   <style>
-    body { width: 280px; font: 13px system-ui, sans-serif; padding: 10px; }
-    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-    #status { color: #666; margin-bottom: 8px; }
-    .range { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #eee; }
-    button { cursor: pointer; }
-    #empty { color: #888; }
-    footer { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; color: #666; }
-    #mode { font-size: 12px; }
+    :root { color-scheme: light dark; }
+    body { width: 320px; margin: 0; padding: 16px; color: #202124; background: #fff; font: 13px/1.4 system-ui, -apple-system, sans-serif; }
+    @media (prefers-color-scheme: dark) {
+      body { color: #f1f3f4; background: #202124; }
+      .subtle, #empty, .range-time, #rangesCount, .mode-option small { color: #aeb4bb; }
+      #statusCard, .range { border-color: #3c4043; }
+      .mode { border-top-color: #3c4043; }
+      button { color: inherit; background: #292a2d; border-color: #5f6368; }
+      #openSettings { color: #8ab4f8; background: transparent; }
+    }
+    header, .section-heading, footer { display: flex; align-items: center; }
+    header { justify-content: space-between; margin-bottom: 14px; }
+    header strong { display: block; font-size: 15px; }
+    .subtle, #empty, .range-time, #rangesCount, .mode-option small { color: #5f6368; }
+    .subtle { font-size: 12px; }
+    .switch { display: inline-flex; gap: 7px; align-items: center; cursor: pointer; font-weight: 600; }
+    .switch input { position: absolute; opacity: 0; pointer-events: none; }
+    .track { width: 32px; height: 18px; padding: 2px; border-radius: 11px; background: #9aa0a6; transition: background .15s; }
+    .track::after { display: block; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px #0004; content: ''; transition: transform .15s; }
+    .switch input:checked + .track { background: #1a73e8; }
+    .switch input:checked + .track::after { transform: translateX(14px); }
+    .switch input:focus-visible + .track { outline: 2px solid #1a73e8; outline-offset: 2px; }
+    .section-heading { justify-content: space-between; margin-bottom: 4px; }
+    .range { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid #e8eaed; }
+    .range:last-child { border-bottom: 0; }
+    .range-label { font-weight: 600; }
+    .range-time { display: block; font-size: 12px; }
+    button { cursor: pointer; border: 1px solid #dadce0; border-radius: 6px; padding: 5px 9px; color: #202124; background: #fff; font: inherit; white-space: nowrap; }
+    button:hover { background: rgba(127, 127, 127, .12); }
+    button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 1px; }
+    #empty { padding: 9px 0 2px; font-size: 12px; }
+    .mode { margin-top: 16px; padding-top: 14px; border-top: 1px solid #e8eaed; }
+    .mode-picker { margin: 6px 0 0; padding: 0; border: 0; min-width: 0; }
+    .mode-option { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 8px 0; cursor: pointer; }
+    .mode-option input { margin: 3px 0 0; accent-color: #1a73e8; }
+    .mode-option strong, .mode-option small { display: block; }
+    .mode-option small { margin-top: 1px; font-size: 12px; }
+    footer { justify-content: flex-end; margin-top: 10px; }
+    #openSettings { padding: 4px 0; border: 0; color: #1a73e8; background: transparent; }
   </style>
 </head>
 <body>
   <header>
-    <strong>Sponsor Skipper</strong>
-    <label><input type="checkbox" id="enabledToggle" /> On</label>
+    <div><strong>Sponsor Skipper</strong><span class="subtle">Skip creator sponsor reads</span></div>
+    <label class="switch" title="Enable or disable sponsor skipping">
+      <input type="checkbox" id="enabledToggle" />
+      <span class="track" aria-hidden="true"></span>
+      <span id="enabledLabel">Enabled</span>
+    </label>
   </header>
-  <div id="status">Analyzing in the background…</div>
-  <div id="ranges"></div>
-  <div id="empty">No sponsor segments found yet.</div>
-  <footer>
-    <span id="mode"></span>
-    <button id="toggleMode" type="button">Use manual button</button>
-    <button id="openSettings">Settings</button>
-  </footer>
+
+  <section aria-labelledby="rangesTitle">
+    <div class="section-heading"><strong id="rangesTitle">Sponsor segments</strong><span id="rangesCount"></span></div>
+    <div id="ranges"></div>
+    <div id="empty">No sponsor segments detected yet.</div>
+  </section>
+
+  <fieldset class="mode mode-picker" aria-labelledby="modeTitle">
+    <legend id="modeTitle"><strong>When a sponsor is reached</strong></legend>
+    <label class="mode-option">
+      <input type="radio" name="skipMode" value="auto" />
+      <span><strong>Skip automatically</strong><small>Playback jumps past the segment with no interaction.</small></span>
+    </label>
+    <label class="mode-option">
+      <input type="radio" name="skipMode" value="manual" />
+      <span><strong>Ask me first with a “Skip sponsor” button</strong><small>A button appears on the player, like YouTube's own skip button. Nothing is skipped unless you click it.</small></span>
+    </label>
+  </fieldset>
+
+  <footer><button id="openSettings" type="button">More settings</button></footer>
   <script src="timeline.js"></script>
   <script src="settings.js"></script>
   <script src="popup.js"></script>
