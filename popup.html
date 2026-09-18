@@ -41,7 +41,17 @@
     .mode-option input { margin: 3px 0 0; accent-color: #1a73e8; }
     .mode-option strong, .mode-option small { display: block; }
     .mode-option small { margin-top: 1px; font-size: 12px; }
-    footer { justify-content: flex-end; margin-top: 10px; }
+    .key-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid #e8eaed; }
+    .key-label { display: block; margin-bottom: 5px; font-weight: 600; }
+    .key-row { display: flex; gap: 7px; }
+    #typesafeApiKey { min-width: 0; flex: 1; box-sizing: border-box; padding: 6px 7px; border: 1px solid #dadce0; border-radius: 6px; color: inherit; background: transparent; font: inherit; }
+    #typesafeApiKey:focus { outline: 2px solid #1a73e8; outline-offset: 1px; }
+    #keyHint { margin-top: 5px; font-size: 12px; }
+    @media (prefers-color-scheme: dark) {
+      .key-section { border-top-color: #3c4043; }
+      #typesafeApiKey { border-color: #5f6368; }
+    }
+    footer { justify-content: space-between; gap: 10px; margin-top: 10px; }
     #openSettings { padding: 4px 0; border: 0; color: #1a73e8; background: transparent; }
   </style>
 </head>
@@ -73,7 +83,16 @@
     </label>
   </fieldset>
 
-  <footer><button id="openSettings" type="button">More settings</button></footer>
+  <section class="key-section" aria-labelledby="keyTitle">
+    <label class="key-label" id="keyTitle" for="typesafeApiKey">Jev API key</label>
+    <div class="key-row">
+      <input type="password" id="typesafeApiKey" autocomplete="off" spellcheck="false" placeholder="Paste your key" />
+      <button id="saveApiKey" type="button">Save</button>
+    </div>
+    <div id="keyHint" class="subtle">Stored locally and used for direct Jev requests. The local server still prepares captions or audio.</div>
+  </section>
+
+  <footer><span id="keyStatus" class="subtle"></span><button id="openSettings" type="button">Settings</button></footer>
   <script src="timeline.js"></script>
   <script src="settings.js"></script>
   <script src="popup.js"></script>

@@ -4,14 +4,15 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { test } = require('node:test');
 const timeline = require('../timeline');
+const settings = require('../settings');
 const VIDEO = 'AI4Ivk5AoZ8';
 
-function harness(fetch) {
+function harness(fetch, initialSettings) {
   let listener;
-  const saved = {};
+  const saved = initialSettings ? { [settings.SETTINGS_KEY]: initialSettings } : {};
   const context = vm.createContext({
     fetch, console: { log() {}, warn() {}, error() {} }, setTimeout,
-    importScripts() {}, ytsbTimeline: timeline,
+    importScripts() {}, ytsbTimeline: timeline, ytsbSettings: settings,
     chrome: {
       runtime: { onMessage: { addListener(fn) { listener = fn; } } },
       storage: { local: {
@@ -55,6 +56,28 @@ test('captions are classified for the whole video in one pass, with adjacent con
   await app.send({ type: 'analyzeAhead', videoId: VIDEO, position: 400 });
   assert.equal(calls.filter(c => c.url.endsWith('/prepare-video')).length, 1);
   assert.equal(calls.filter(c => c.url.endsWith('/classify')).length, 1);
+});
+
+test('uses a user-provided Jev key directly instead of the local proxy', async () => {
+  const calls = [];
+  const app = harness(async (url, options) => {
+    calls.push({ url, options });
+    const body = JSON.parse(options.body);
+    if (url.endsWith('/prepare-video')) return ok({ source: 'captions', duration: 1800, language: 'en', segments: [
+      { id: 's0', start: 990, end: 999, text: 'Normal content.' },
+      { id: 's1', start: 1000, end: 1005, text: 'Use code SAVE for this sponsor.' },
+    ] });
+    if (url === 'https://api.typesafe.ai/v1/systemone') {
+      assert.equal(options.headers.Authorization, 'Bearer user-key');
+      assert.equal(body.model, 'jev-latest');
+      return ok({ answers: { s0: { noul: 0.05 }, s1: { noul: 0.95 } } });
+    }
+    assert.fail(`user key must bypass proxy: ${url}`);
+  }, { ...settings.DEFAULTS, typesafeApiKey: ' user-key ' });
+  const state = await app.send({ type: 'analyzeAhead', videoId: VIDEO, position: 1000 });
+  assert.equal(state.error, undefined);
+  assert.deepEqual(JSON.parse(JSON.stringify(state.sponsorRanges)), [{ start: 1000, end: 1005 }]);
+  assert.equal(calls.filter(c => c.url === 'https://api.typesafe.ai/v1/systemone').length, 1);
 });
 
 test('a sponsor boundary inside a caption block is refined to the word', async () => {

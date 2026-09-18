@@ -3,15 +3,17 @@
 // never leave the player controller acting on an undefined mode.
 (function (root) {
   const SETTINGS_KEY = 'ytsb:settings';
-  const DEFAULTS = { enabled: true, skipMode: 'auto', minSkipSeconds: 1 };
+  const DEFAULTS = { enabled: true, skipMode: 'auto', minSkipSeconds: 1, typesafeApiKey: '' };
 
   function normalize(stored) {
     const merged = { ...DEFAULTS, ...(stored && typeof stored === 'object' ? stored : {}) };
     const minSkipSeconds = Number(merged.minSkipSeconds);
+    const typesafeApiKey = typeof merged.typesafeApiKey === 'string' ? merged.typesafeApiKey.trim() : '';
     return {
       enabled: merged.enabled !== false,
       skipMode: merged.skipMode === 'manual' ? 'manual' : 'auto',
       minSkipSeconds: Number.isFinite(minSkipSeconds) ? Math.min(60, Math.max(0, minSkipSeconds)) : DEFAULTS.minSkipSeconds,
+      typesafeApiKey,
     };
   }
 

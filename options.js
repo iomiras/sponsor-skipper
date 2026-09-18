@@ -1,6 +1,7 @@
 const fields = {
   enabled: document.getElementById('enabled'),
   minSkipSeconds: document.getElementById('minSkipSeconds'),
+  typesafeApiKey: document.getElementById('typesafeApiKey'),
 };
 const savedNote = document.getElementById('saved');
 let savedTimer = 0;
@@ -8,6 +9,7 @@ let savedTimer = 0;
 function render(settings) {
   fields.enabled.checked = settings.enabled;
   fields.minSkipSeconds.value = settings.minSkipSeconds;
+  fields.typesafeApiKey.value = settings.typesafeApiKey;
   for (const radio of document.querySelectorAll('input[name="skipMode"]')) {
     radio.checked = radio.value === settings.skipMode;
   }
@@ -25,6 +27,7 @@ async function save(patch) {
 
 fields.enabled.addEventListener('change', () => save({ enabled: fields.enabled.checked }));
 fields.minSkipSeconds.addEventListener('change', () => save({ minSkipSeconds: Number(fields.minSkipSeconds.value) }));
+fields.typesafeApiKey.addEventListener('change', () => save({ typesafeApiKey: fields.typesafeApiKey.value }));
 for (const radio of document.querySelectorAll('input[name="skipMode"]')) {
   radio.addEventListener('change', () => radio.checked && save({ skipMode: radio.value }));
 }

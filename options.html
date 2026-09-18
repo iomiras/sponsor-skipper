@@ -12,6 +12,7 @@
     label { display: block; margin: 6px 0; }
     .hint { color: #777; margin: 2px 0 0 22px; }
     input[type="number"] { width: 4em; }
+    input[type="password"], input[type="text"] { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 5px 6px; font: inherit; }
     footer { display: flex; align-items: center; gap: 10px; }
     #saved { color: #1a7f37; opacity: 0; transition: opacity .15s; }
     #saved.show { opacity: 1; }
@@ -32,6 +33,13 @@
     <p class="hint">Playback jumps past the segment with no interaction.</p>
     <label><input type="radio" name="skipMode" value="manual" /> Ask me first with a “Skip sponsor” button</label>
     <p class="hint">A button appears on the player, like YouTube's own skip button. Nothing is skipped unless you click it.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Jev API key</legend>
+    <label for="typesafeApiKey">Use your own TypeSafe key (optional)</label>
+    <input type="password" id="typesafeApiKey" autocomplete="off" spellcheck="false" placeholder="Paste your key here" />
+    <p class="hint">The key stays in this extension's local storage and is used for direct Jev requests. It is never sent to the project server.</p>
   </fieldset>
 
   <fieldset>

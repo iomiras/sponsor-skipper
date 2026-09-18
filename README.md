@@ -20,12 +20,13 @@ After any code change, restart the server, reload the extension, and refresh You
 - Caches completed classifications in extension storage. Concurrent tabs of the same video serialize updates. Old live-capture cache entries are ignored.
 - The popup shows whether analysis is ready, how far ahead it has checked, and detected ranges. Failed analysis retries after 30 seconds without interrupting playback.
 - Automatic skipping is the default. Turn off **Skip automatically** in the popup (or choose **Ask me first** in Settings) to show the on-player button while playback is inside a detected sponsor range.
+- You can add your own TypeSafe API key in the popup or Settings. When present, Jev classification runs directly from the extension; the key is stored in local extension storage and is not sent to the project server. The local server is still needed to fetch captions or prepare audio for Whisper. Without a personal key, classification uses the server proxy.
 
 ## Limitations
 
 If analysis is late, you may hear part or all of a sponsor before it is detected. Already-passed ranges do not rewind playback. Classifier mistakes and imperfect caption timestamps can cause missed or incorrect skips. Live streams and restricted videos may be unavailable. The audio fallback uses English-only Whisper tiny.en. YouTube's own ads are not the target; the player controller leaves recognized ad playback alone.
 
-Non-empty transcript segments and their context are sent to TypeSafe, so usage grows with viewing time. Audio fallback downloads and transcription run locally. The API key stays on the server.
+Non-empty transcript segments and their context are sent to TypeSafe, so usage grows with viewing time. Audio fallback downloads and transcription run locally. A personal API key stays in the extension; the proxy key stays on the server.
 
 ## Development
 

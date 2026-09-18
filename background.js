@@ -12,10 +12,12 @@ importScripts('timeline.js', 'settings.js');
 
 const TRANSCRIBE_URL = 'http://localhost:8787/transcribe';
 const PROXY_URL = 'http://localhost:8787/classify';
+const TYPESAFE_URL = 'https://api.typesafe.ai/v1/systemone';
 const NOUL_THRESHOLD = 0.6; // starting default, tune via testing
 const MERGE_GAP_SECONDS = 15;
 const RANGE_BUFFER_SECONDS = 2;
 const CLASSIFY_BATCH_SIZE = 40;
+const CLASSIFY_CONCURRENCY = 3;
 // Refinement walks short non-overlapping word windows across the transition.
 // Overlapping or longer windows report a hit anywhere inside themselves, which
 // drags the boundary outward by the window length and skips real content.
@@ -45,6 +47,10 @@ async function setState(videoId, state) {
 }
 
 async function getSettings() {
+  // The service worker imports settings.js before handling messages. This
+  // fallback also keeps isolated test harnesses and older extension reloads
+  // on the server-backed path until settings.js is available.
+  if (typeof ytsbSettings === 'undefined') return { enabled: true, skipMode: 'auto', minSkipSeconds: 1, typesafeApiKey: '' };
   const stored = await chrome.storage.local.get(ytsbSettings.SETTINGS_KEY);
   return ytsbSettings.normalize(stored[ytsbSettings.SETTINGS_KEY]);
 }
@@ -84,10 +90,40 @@ async function transcribeAudio(pcm, sampleRate, chunkStart) {
 // out in bounded batches rather than one request the server has to hold open.
 async function classifySegments(segments) {
   const results = {};
+  const batches = [];
   for (let i = 0; i < segments.length; i += CLASSIFY_BATCH_SIZE) {
-    const batch = segments.slice(i, i + CLASSIFY_BATCH_SIZE);
-    Object.assign(results, await classifyBatch(batch));
+    batches.push(segments.slice(i, i + CLASSIFY_BATCH_SIZE));
   }
+  for (let i = 0; i < batches.length; i += CLASSIFY_CONCURRENCY) {
+    const group = batches.slice(i, i + CLASSIFY_CONCURRENCY);
+    console.log(`[ytsb] classifying ${group.length} Jev batch(es) in parallel`);
+    const completed = await Promise.all(group.map((batch) => classifyBatch(batch)));
+    for (const batchResults of completed) Object.assign(results, batchResults);
+  }
+  return results;
+}
+
+function buildTypeSafeRequest(segments) {
+  const state = {};
+  const questions = {};
+  for (const { id, text, context } of segments) {
+    state[id] = { text, context: context || '' };
+    questions[id] = {
+      type: 'noul',
+      instructions:
+        `Is this transcript segment a creator-inserted sponsor/advertisement read (not YouTube's own ad), based on \`state.${id}.text\` and \`state.${id}.context\`? yes or no.`,
+      criteria: {
+        true: 'segment promotes/reads an ad for a product, service, or sponsor, e.g. discount codes, "this video is sponsored by", brand pitch',
+        false: 'segment is normal video content unrelated to sponsorship',
+      },
+    };
+  }
+  return { state, model: 'jev-latest', questions };
+}
+
+function mapTypeSafeResults(answers) {
+  const results = {};
+  for (const [id, answer] of Object.entries(answers || {})) results[id] = { noul: answer.noul };
   return results;
 }
 
@@ -96,17 +132,22 @@ async function classifyBatch(segments) {
   const body = {
     segments: segments.map((seg) => ({ id: seg.id, text: seg.text, context: seg.context || '' })),
   };
-  console.log(`[ytsb] sending ${segments.length} segment(s) to Jev for classification`);
+  const settings = await getSettings();
+  const ownKey = settings.typesafeApiKey;
+  const direct = Boolean(ownKey);
+  const url = direct ? TYPESAFE_URL : PROXY_URL;
+  const requestBody = direct ? buildTypeSafeRequest(segments) : body;
+  console.log(`[ytsb] sending ${segments.length} segment(s) to Jev via ${direct ? 'personal API key' : 'local proxy'}`);
 
   const maxRetries = 4;
   let attempt = 0;
   while (true) {
     let res;
     try {
-      res = await fetch(PROXY_URL, {
+      res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        headers: direct ? { 'Content-Type': 'application/json', Authorization: `Bearer ${ownKey}` } : { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
       });
     } catch (err) {
       console.warn(`[ytsb] Jev request failed (attempt ${attempt}):`, err.message);
@@ -126,9 +167,10 @@ async function classifyBatch(segments) {
       throw new Error(`proxy error: ${res.status}`);
     }
     const data = await res.json();
-    const scores = Object.values(data.results || {});
+    const results = direct ? mapTypeSafeResults(data.answers) : data.results || {};
+    const scores = Object.values(results);
     console.log(`[ytsb] Jev returned ${scores.length} score(s), ${scores.filter((s) => s.noul >= NOUL_THRESHOLD).length} above threshold`);
-    return data.results || {};
+    return results;
   }
 }
 

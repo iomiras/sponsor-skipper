@@ -17,6 +17,9 @@ async function main() {
   const rangesTitle = document.getElementById('rangesTitle');
   const rangesCount = document.getElementById('rangesCount');
   const emptyEl = document.getElementById('empty');
+  const keyStatus = document.getElementById('keyStatus');
+  const apiKeyInput = document.getElementById('typesafeApiKey');
+  const saveApiKey = document.getElementById('saveApiKey');
   document.getElementById('openSettings').addEventListener('click', () => chrome.runtime.openOptionsPage());
 
   let settings = ytsbSettings.normalize(await chrome.runtime.sendMessage({ type: 'getSettings' }));
@@ -25,6 +28,8 @@ async function main() {
     const automatic = settings.skipMode !== 'manual';
     enabledToggle.checked = settings.enabled;
     enabledLabel.textContent = settings.enabled ? 'On' : 'Off';
+    keyStatus.textContent = settings.typesafeApiKey ? 'Using your Jev key' : 'Using server Jev key';
+    if (document.activeElement !== apiKeyInput) apiKeyInput.value = settings.typesafeApiKey;
     for (const radio of modeRadios) radio.checked = automatic ? radio.value === 'auto' : radio.value === 'manual';
   }
 
@@ -36,6 +41,17 @@ async function main() {
   renderSettings();
   enabledToggle.addEventListener('change', () => setSettings({ enabled: enabledToggle.checked }));
   for (const radio of modeRadios) radio.addEventListener('change', () => radio.checked && setSettings({ skipMode: radio.value }));
+  saveApiKey.addEventListener('click', async () => {
+    saveApiKey.disabled = true;
+    try {
+      await setSettings({ typesafeApiKey: apiKeyInput.value });
+      document.getElementById('keyHint').textContent = settings.typesafeApiKey
+        ? 'Saved locally. Jev uses your key; the local server still prepares captions or audio.'
+        : 'No key saved. Jev uses the server proxy.';
+    } finally {
+      saveApiKey.disabled = false;
+    }
+  });
 
   if (!videoId) {
     return;
