@@ -28,4 +28,4 @@ Non-empty transcript segments and their context are sent to TypeSafe, so usage g
 
 ## Development
 
-Run `node --test tests/*.test.cjs` from the project root. The server prints request logs, caption selection, and classifier results. Inspect the extension's service worker at `chrome://extensions` for scheduling and cache details. The content script does not use ScriptProcessorNode or capture playback audio.
+Run `node --test tests/*.test.cjs` from the project root. The server prints request logs, caption selection, and classifier summaries; start it with `YTSB_VERBOSE=1` to also dump every segment sent to the classifier and every score returned, which is a few hundred lines per video. Inspect the extension's service worker at `chrome://extensions` for scheduling and cache details. The content script does not use ScriptProcessorNode or capture playback audio.

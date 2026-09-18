@@ -96,7 +96,7 @@ async function classifyBatch(segments) {
   const body = {
     segments: segments.map((seg) => ({ id: seg.id, text: seg.text, context: seg.context || '' })),
   };
-  console.log(`[ytsb] sending ${segments.length} segment(s) to Jev for classification:`, body.segments);
+  console.log(`[ytsb] sending ${segments.length} segment(s) to Jev for classification`);
 
   const maxRetries = 4;
   let attempt = 0;
@@ -126,7 +126,8 @@ async function classifyBatch(segments) {
       throw new Error(`proxy error: ${res.status}`);
     }
     const data = await res.json();
-    console.log('[ytsb] Jev response:', data.results);
+    const scores = Object.values(data.results || {});
+    console.log(`[ytsb] Jev returned ${scores.length} score(s), ${scores.filter((s) => s.noul >= NOUL_THRESHOLD).length} above threshold`);
     return data.results || {};
   }
 }
@@ -300,7 +301,8 @@ async function handleChunkProcessed(videoId, chunkRange, segments) {
     for (const seg of spoken) {
       const noul = results[seg.id]?.noul;
       if (!Number.isFinite(noul) || noul < 0 || noul > 1) throw new Error(`Missing or invalid classifier score for ${seg.id}`);
-      console.log(`[ytsb] segment ${seg.id}: sponsor score=${noul}, threshold=${NOUL_THRESHOLD}, accepted=${noul >= NOUL_THRESHOLD}`);
+      // Only the accepted ones, since a rejected score says nothing useful.
+      if (noul >= NOUL_THRESHOLD) console.log(`[ytsb] sponsor segment ${seg.id} [${seg.start.toFixed(1)}s-${seg.end.toFixed(1)}s] score=${noul}`);
       state.candidateSegments = state.candidateSegments.filter((candidate) => candidate.id !== seg.id);
       state.candidateSegments.push({ id: seg.id, start: seg.start, end: seg.end, text: seg.text, confidence: noul });
     }

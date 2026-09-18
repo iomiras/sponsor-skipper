@@ -4,6 +4,7 @@ const { transcribeChunk } = require('./transcribe');
 const { prepareVideo, transcribeVideo, validateVideoId } = require('./video-source');
 
 const PORT = process.env.PORT || 8787;
+const VERBOSE = Boolean(process.env.YTSB_VERBOSE);
 const TYPESAFE_API_KEY = process.env.TYPESAFE_API_KEY;
 const TYPESAFE_URL = 'https://api.typesafe.ai/v1/systemone';
 
@@ -34,8 +35,12 @@ function buildRequestBody(segments) {
 async function callTypeSafe(segments, logPrefix) {
   const body = buildRequestBody(segments);
   console.log(`${logPrefix} -> Jev: ${segments.length} segment(s)`);
-  for (const seg of segments) {
-    console.log(`${logPrefix} segment ${seg.id}: ${JSON.stringify(seg.text)}; context: ${JSON.stringify(seg.context || '')}`);
+  // A whole video is hundreds of segments per request, so the per-segment dump
+  // is opt-in via YTSB_VERBOSE rather than the default.
+  if (VERBOSE) {
+    for (const seg of segments) {
+      console.log(`${logPrefix} segment ${seg.id}: ${JSON.stringify(seg.text)}; context: ${JSON.stringify(seg.context || '')}`);
+    }
   }
   const maxRetries = 4;
   let attempt = 0;
@@ -65,7 +70,10 @@ async function callTypeSafe(segments, logPrefix) {
       throw new Error(`TypeSafe error ${res.status}: ${text}`);
     }
     const json = await res.json();
-    console.log(`${logPrefix} <- Jev answers: ${JSON.stringify(json.answers)}`);
+    const answers = Object.values(json.answers || {});
+    const strong = answers.filter((answer) => answer.noul >= 0.6).length;
+    console.log(`${logPrefix} <- Jev: ${answers.length} answer(s), ${strong} at or above 0.6`);
+    if (VERBOSE) console.log(`${logPrefix} <- Jev answers: ${JSON.stringify(json.answers)}`);
     return json;
   }
 }
