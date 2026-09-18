@@ -5,7 +5,9 @@ let videoId = null;
 let video = null;
 let state = { processedChunks: [], sponsorRanges: [] };
 let settings = ytsbSettings.normalize(null);
+let skipWidget = null;
 let skipButton = null;
+let autoSkipButton = null;
 let generation = 0;
 let busy = false;
 let error = '';
@@ -28,39 +30,75 @@ function isYouTubeAd() {
 
 // Mirrors .ytp-ad-skip-button: flush to the right edge, sitting above the
 // progress bar, so it reads as part of the player rather than an add-on.
-const SKIP_BUTTON_STYLE = [
+const SKIP_WIDGET_STYLE = [
   'position:absolute', 'right:0', 'bottom:12%', 'z-index:2147483000',
+  'margin:0', 'display:flex!important', 'flex-direction:column', 'align-items:flex-end', 'gap:4px',
+  'visibility:visible!important', 'opacity:1!important',
+].join(';');
+const SKIP_BUTTON_STYLE = [
   'margin:0', 'padding:10px 16px',
   'font:500 14px/1 Roboto,Arial,system-ui,sans-serif',
   'color:#fff', 'background:rgba(0,0,0,.6)',
   'border:1px solid rgba(255,255,255,.3)', 'border-right:none',
   'border-radius:3px 0 0 3px', 'cursor:pointer', 'pointer-events:auto',
-  'display:flex!important', 'visibility:visible!important', 'opacity:1!important',
 ].join(';');
+const AUTO_SKIP_BUTTON_STYLE = [
+  'margin:0', 'padding:5px 12px',
+  'font:400 12px/1 Roboto,Arial,system-ui,sans-serif',
+  'color:#fff', 'background:rgba(0,0,0,.6)',
+  'border:1px solid rgba(255,255,255,.3)', 'border-right:none',
+  'border-radius:3px 0 0 3px', 'cursor:pointer', 'pointer-events:auto',
+].join(';');
+
+function doSkip(target) {
+  if (!video || !Number.isFinite(target)) return;
+  video.currentTime = target;
+  hideSkipButton();
+  tick();
+}
 
 // Built on demand: in auto mode the player is never touched, which keeps the
 // overlay out of the way of anyone who just wants the skip to happen.
 function showSkipButton(target) {
-  if (!skipButton) {
+  if (!skipWidget) {
+    const consumePlayerEvent = (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+
+    skipWidget = document.createElement('div');
+    skipWidget.id = 'ytsb-skip-widget';
+
     skipButton = document.createElement('button');
     skipButton.id = 'ytsb-skip-button';
     skipButton.type = 'button';
     skipButton.setAttribute('aria-label', 'Skip detected sponsor segment');
     skipButton.textContent = 'Skip sponsor ⏭';
-    const consumePlayerEvent = (event) => {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    };
     skipButton.addEventListener('pointerdown', consumePlayerEvent, true);
     skipButton.addEventListener('mousedown', consumePlayerEvent, true);
     skipButton.addEventListener('click', (event) => {
       consumePlayerEvent(event); // do not let YouTube's player surface handle it
-      const to = Number(skipButton.dataset.target);
-      if (!video || !Number.isFinite(to)) return;
-      video.currentTime = to;
-      hideSkipButton();
-      tick();
+      doSkip(Number(skipButton.dataset.target));
     });
+
+    autoSkipButton = document.createElement('button');
+    autoSkipButton.id = 'ytsb-auto-skip-button';
+    autoSkipButton.type = 'button';
+    autoSkipButton.setAttribute('aria-label', 'Skip sponsor segments automatically from now on');
+    autoSkipButton.textContent = 'Skip automatically from now on';
+    autoSkipButton.addEventListener('pointerdown', consumePlayerEvent, true);
+    autoSkipButton.addEventListener('mousedown', consumePlayerEvent, true);
+    autoSkipButton.addEventListener('click', (event) => {
+      consumePlayerEvent(event);
+      const to = Number(skipButton.dataset.target);
+      message({ type: 'setSettings', settings: { skipMode: 'auto' } })
+        .then((next) => { settings = ytsbSettings.normalize(next); })
+        .catch((err) => console.error('[ytsb] setSettings failed:', err.message));
+      doSkip(to);
+    });
+
+    skipWidget.appendChild(skipButton);
+    skipWidget.appendChild(autoSkipButton);
   }
   skipButton.dataset.target = String(target);
   // The player re-renders on navigation, so re-attach rather than assuming.
@@ -69,14 +107,16 @@ function showSkipButton(target) {
     hideSkipButton();
     return;
   }
-  if (skipButton.parentElement !== host) host.appendChild(skipButton);
+  if (skipWidget.parentElement !== host) host.appendChild(skipWidget);
   // Written every time, and as display rather than [hidden]: any YouTube rule
   // setting display on a player descendant would override the hidden attribute.
-  skipButton.style.cssText = `${SKIP_BUTTON_STYLE};display:flex`;
+  skipWidget.style.cssText = `${SKIP_WIDGET_STYLE};display:flex`;
+  skipButton.style.cssText = SKIP_BUTTON_STYLE;
+  autoSkipButton.style.cssText = AUTO_SKIP_BUTTON_STYLE;
 }
 
 function hideSkipButton() {
-  if (skipButton) skipButton.style.cssText = `${SKIP_BUTTON_STYLE};display:none!important`;
+  if (skipWidget) skipWidget.style.cssText = `${SKIP_WIDGET_STYLE};display:none!important`;
 }
 
 function reconcilePlayback() {

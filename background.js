@@ -51,7 +51,7 @@ async function getSettings() {
   // The service worker imports settings.js before handling messages. This
   // fallback also keeps isolated test harnesses and older extension reloads
   // on the server-backed path until settings.js is available.
-  if (typeof ytsbSettings === 'undefined') return { enabled: true, skipMode: 'auto', minSkipSeconds: 1, typesafeApiKey: '' };
+  if (typeof ytsbSettings === 'undefined') return { enabled: true, skipMode: 'manual', minSkipSeconds: 1, typesafeApiKey: '' };
   const stored = await chrome.storage.local.get(ytsbSettings.SETTINGS_KEY);
   return ytsbSettings.normalize(stored[ytsbSettings.SETTINGS_KEY]);
 }
@@ -447,8 +447,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true; // keep the message channel open for the async response
 });
 
-// New installs skip sponsors automatically with no prompt; open settings once so
-// people see that default and can switch to "ask me first" before it surprises them.
+// Open settings once on install so people can review the default and adjust it
+// before watching their first video.
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') chrome.runtime.openOptionsPage();
 });

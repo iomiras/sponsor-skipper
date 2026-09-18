@@ -11,9 +11,11 @@ A Chrome MV3 extension that analyzes timed captions ahead of playback and skips 
    Or download it as a ZIP file: on the GitHub page, click **Code**, then **Download ZIP**, then unzip it.
 2. (Optional, local development only) Follow `server/README.md` for dependencies. Start the backend with `cd server`, `export TYPESAFE_API_KEY='your-key'`, then `npm start`. Not needed if you use the deployed backend the extension already points to.
 3. Open `chrome://extensions`, enable Developer Mode, and load this project's root directory as an unpacked extension. If already loaded, click Reload.
-4. Refresh the YouTube tab and watch normally. Analysis runs in the background; detected sponsor segments are skipped automatically.
+4. Refresh the YouTube tab and watch normally. Analysis runs in the background; when a sponsor segment is detected, the extension asks first with a **Skip sponsor** button.
 
 After any code change, reload the extension and refresh YouTube. Restart the local server too, if you are running one.
+
+> **Note:** By default, the extension asks first with a **Skip sponsor** button. To skip detected sponsor segments without a prompt, select **Skip automatically** in the popup or Settings.
 
 ## See it in action
 
@@ -32,7 +34,7 @@ The demo has two parts: it first shows automatic skipping, then shows the YouTub
 - Playback continues while analysis runs, including after seeking into unchecked content. A newly detected sponsor is skipped immediately if playback is already inside it. There is no preparation overlay or automatic pause/resume.
 - Caches completed classifications in extension storage. Concurrent tabs of the same video serialize updates. Old live-capture cache entries are ignored.
 - The popup shows whether analysis is ready, how far ahead it has checked, and detected ranges. Failed analysis retries after 30 seconds without interrupting playback.
-- Automatic skipping is the default. Turn off **Skip automatically** in the popup (or choose **Ask me first** in Settings) to show the on-player button while playback is inside a detected sponsor range.
+- Asking first with a **Skip sponsor** button is the default. Choose **Skip automatically** in the popup or Settings to skip detected sponsor segments without a prompt.
 - You can add your own TypeSafe API key in the popup or Settings. When present, Jev classification runs directly from the extension; the key is stored in local extension storage and is not sent to the project server. The local server is still needed to fetch captions or prepare audio for Whisper. Without a personal key, classification uses the server proxy.
 
 ## Limitations

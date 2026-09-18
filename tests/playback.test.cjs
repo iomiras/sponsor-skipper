@@ -46,7 +46,7 @@ async function player(overrides = {}) {
       runtime: {
         onMessage: { addListener() {} },
         async sendMessage(msg) {
-          if (msg.type === 'getSettings') return ytsbSettings.normalize(overrides.settings);
+          if (msg.type === 'getSettings') return ytsbSettings.normalize({ skipMode: 'auto', ...(overrides.settings || {}) });
           if (msg.type === 'getState') return { processedChunks: [], sponsorRanges: [] };
           return new Promise((resolve, reject) => pending.push({ msg, resolve, reject }));
         },
