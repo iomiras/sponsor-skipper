@@ -13,7 +13,8 @@ After any code change, restart the server, reload the extension, and refresh You
 ## Analysis ahead of playback
 
 - Fetches the full timed subtitles, including automatic captions, without running Whisper when captions are usable.
-- Classifies 60-second sections near the current playback position and maintains about two minutes of checked coverage ahead.
+- Classifies every caption segment in the video in one batched pass, because the whole subtitle track already arrives with the metadata.
+- Refines each detected read to the word: caption blocks run up to 15 seconds, so short word windows are classified across the transition to find where the read actually starts and ends.
 - For videos without usable captions, downloads 30-second audio slices independently of the player, then transcribes locally with Whisper.
 - Playback continues while analysis runs, including after seeking into unchecked content. A newly detected sponsor is skipped immediately if playback is already inside it. There is no preparation overlay or automatic pause/resume.
 - Caches completed classifications in extension storage. Concurrent tabs of the same video serialize updates. Old live-capture cache entries are ignored.

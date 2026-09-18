@@ -25,7 +25,7 @@ function harness(fetch) {
 }
 const ok = (body) => ({ ok: true, json: async () => body });
 
-function captionServer(calls, results = { s1: { noul: 0.95 }, s2: { noul: 0.1 } }) {
+function captionServer(calls, results = { s0: { noul: 0.05 }, s1: { noul: 0.95 }, s2: { noul: 0.1 } }) {
   return async (url, options) => {
     const body = JSON.parse(options.body);
     calls.push({ url, body });
@@ -39,21 +39,49 @@ function captionServer(calls, results = { s1: { noul: 0.95 }, s2: { noul: 0.1 } 
   };
 }
 
-test('caption analysis runs ahead at a deep link without audio and includes adjacent context', async () => {
+test('captions are classified for the whole video in one pass, with adjacent context', async () => {
   const calls = [];
   const app = harness(captionServer(calls));
   const state = await app.send({ type: 'analyzeAhead', videoId: VIDEO, position: 1000 });
   assert.equal(state.error, undefined);
-  assert.deepEqual(JSON.parse(JSON.stringify(state.processedChunks)), [[1000, 1060]]);
-  assert.deepEqual(JSON.parse(JSON.stringify(state.sponsorRanges)), [{ start: 998, end: 1007 }]);
+  // Captions for the whole video arrive with prepare-video, so nothing is left to check.
+  assert.deepEqual(JSON.parse(JSON.stringify(state.processedChunks)), [[0, 1800]]);
+  assert.deepEqual(JSON.parse(JSON.stringify(state.sponsorRanges)), [{ start: 1000, end: 1005 }]);
   const classified = calls.find(c => c.url.endsWith('/classify')).body.segments;
-  assert.equal(classified.length, 2);
-  assert.equal(classified[0].context, 'Here is a drink for the outdoors. / Now back to our hike.');
+  assert.equal(classified.length, 3);
+  assert.equal(classified[1].context, 'Here is a drink for the outdoors. / Now back to our hike.');
   assert.equal(state.source, 'captions');
   await app.send({ type: 'analyzeAhead', videoId: VIDEO, position: 1000 });
-  await app.send({ type: 'analyzeAhead', videoId: VIDEO, position: 1000 });
+  await app.send({ type: 'analyzeAhead', videoId: VIDEO, position: 400 });
   assert.equal(calls.filter(c => c.url.endsWith('/prepare-video')).length, 1);
   assert.equal(calls.filter(c => c.url.endsWith('/classify')).length, 1);
+});
+
+test('a sponsor boundary inside a caption block is refined to the word', async () => {
+  // One block holds the end of the content and the start of the read, which is
+  // exactly the case caption-level timing cannot resolve.
+  const words = (text, from, step) => text.split(' ').map((word, i) => ({ text: word, start: from + i * step }));
+  const segments = [{
+    id: 'm0', start: 100, end: 118, words: words('and that is the lens this video is sponsored by NordVPN', 100, 1.5),
+    text: 'and that is the lens this video is sponsored by NordVPN',
+  }];
+  const app = harness(async (url, options) => {
+    const body = JSON.parse(options.body);
+    if (url.endsWith('/prepare-video')) return ok({ source: 'captions', duration: 200, language: 'en', segments });
+    if (url.endsWith('/classify')) {
+      const results = {};
+      for (const seg of body.segments) results[seg.id] = { noul: /sponsor|nordvpn/i.test(seg.text) ? 0.95 : 0.02 };
+      return ok({ results });
+    }
+    assert.fail(url);
+  });
+  const state = await app.send({ type: 'analyzeAhead', videoId: VIDEO, position: 100 });
+  assert.equal(state.error, undefined);
+  const [range] = state.sponsorRanges;
+  // "sponsored" starts at 112s; the block starts at 100s. Refinement must land
+  // near the read, and must never start before it.
+  assert.ok(range.start > 106, `refined start ${range.start} still inside the content`);
+  assert.ok(range.start <= 112, `refined start ${range.start} overshot the sponsor word`);
 });
 
 test('missing model answers fail without marking captions checked', async () => {
@@ -68,7 +96,7 @@ test('concurrent tabs serialize analysis without losing completed ranges', async
   const app = harness(captionServer([]));
   await Promise.all([0, 1000].map(position => app.send({ type: 'analyzeAhead', videoId: VIDEO, position })));
   const state = await app.send({ type: 'getState', videoId: VIDEO });
-  assert.deepEqual(JSON.parse(JSON.stringify(state.processedChunks)), [[0, 60], [1000, 1060]]);
+  assert.deepEqual(JSON.parse(JSON.stringify(state.processedChunks)), [[0, 1800]]);
 });
 
 test('without captions, fetches a future audio slice rather than recording playback', async () => {

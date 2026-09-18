@@ -15,6 +15,14 @@ const PROXY_URL = 'http://localhost:8787/classify';
 const NOUL_THRESHOLD = 0.6; // starting default, tune via testing
 const MERGE_GAP_SECONDS = 15;
 const RANGE_BUFFER_SECONDS = 2;
+const CLASSIFY_BATCH_SIZE = 40;
+// Refinement walks short non-overlapping word windows across the transition.
+// Overlapping or longer windows report a hit anywhere inside themselves, which
+// drags the boundary outward by the window length and skips real content.
+const REFINE_WINDOW_WORDS = 3;
+// A window ends a beat after its last word, not at the next word: a long pause
+// after the read would otherwise pull the skip into the content that follows.
+const WORD_TAIL_SECONDS = 0.6;
 const preparedVideos = new Map();
 const videoJobs = new Map();
 
@@ -67,7 +75,18 @@ async function transcribeAudio(pcm, sampleRate, chunkStart) {
   return data.segments || [];
 }
 
+// Jev is cheap per question but a whole video is hundreds of them, so they go
+// out in bounded batches rather than one request the server has to hold open.
 async function classifySegments(segments) {
+  const results = {};
+  for (let i = 0; i < segments.length; i += CLASSIFY_BATCH_SIZE) {
+    const batch = segments.slice(i, i + CLASSIFY_BATCH_SIZE);
+    Object.assign(results, await classifyBatch(batch));
+  }
+  return results;
+}
+
+async function classifyBatch(segments) {
   if (segments.length === 0) return {};
   const body = {
     segments: segments.map((seg) => ({ id: seg.id, text: seg.text, context: seg.context || '' })),
@@ -133,6 +152,129 @@ function mergeSponsorRanges(candidateSegments) {
   }));
 }
 
+// Consecutive flagged caption segments (allowing a short gap of unflagged ones)
+// form one sponsor read, kept as index runs so refinement can look at neighbours.
+function mergeRuns(segments, flagged) {
+  const runs = [];
+  for (let i = 0; i < segments.length; i++) {
+    if (!flagged.has(segments[i].id)) continue;
+    const last = runs.at(-1);
+    if (last && segments[i].start - segments[last.lastIndex].end <= MERGE_GAP_SECONDS) {
+      last.lastIndex = i;
+    } else {
+      runs.push({ firstIndex: i, lastIndex: i });
+    }
+  }
+  return runs;
+}
+
+function clamp(value, low, high) {
+  return Math.min(Math.max(value, low), high);
+}
+
+function wordsBetween(segments, fromIndex, toIndex) {
+  const words = [];
+  for (let i = Math.max(0, fromIndex); i <= Math.min(segments.length - 1, toIndex); i++) {
+    words.push(...(segments[i].words || []));
+  }
+  return words;
+}
+
+function buildWindows(words, id) {
+  const windows = [];
+  const all = words.map((word) => word.text).join(' ');
+  for (let i = 0; i < words.length; i += REFINE_WINDOW_WORDS) {
+    const slice = words.slice(i, i + REFINE_WINDOW_WORDS);
+    if (!slice.length) break;
+    const tail = slice.at(-1).start + WORD_TAIL_SECONDS;
+    const next = words[i + slice.length]?.start;
+    windows.push({
+      id: `${id}-${i}`,
+      start: slice[0].start,
+      end: next === undefined ? tail : Math.min(next, tail),
+      text: slice.map((word) => word.text).join(' '),
+      // three words alone are ambiguous, so the surrounding speech is the context.
+      context: all,
+    });
+  }
+  return windows;
+}
+
+// Pass 2. The coarse pass only knows which caption blocks are sponsor, and a
+// block can be 15s long, so the read's real edge is found by classifying short
+// word windows across the transition on either side.
+async function refineRuns(runs, segments) {
+  const plans = runs.map((run, index) => {
+    const startWords = wordsBetween(segments, run.firstIndex - 1, run.firstIndex);
+    const endWords = wordsBetween(segments, run.lastIndex, run.lastIndex + 1);
+    return {
+      run,
+      startWindows: buildWindows(startWords, `run${index}-start`),
+      endWindows: buildWindows(endWords, `run${index}-end`),
+    };
+  });
+
+  const all = plans.flatMap((plan) => [...plan.startWindows, ...plan.endWindows]);
+  const results = all.length ? await classifySegments(all) : {};
+
+  return plans.map(({ run, startWindows, endWindows }) => {
+    const coarseStart = segments[run.firstIndex].start;
+    const coarseEnd = segments[run.lastIndex].end;
+    const isSponsor = (window) => (results[window.id]?.noul ?? 0) >= NOUL_THRESHOLD;
+
+    const firstSponsor = startWindows.find(isSponsor);
+    const lastSponsor = [...endWindows].reverse().find(isSponsor);
+    // The refined edge is the point of the whole pass, so it wins over the
+    // caption-block edge in both directions; the neighbours only bound it.
+    const earliest = segments[run.firstIndex - 1]?.start ?? coarseStart;
+    const latest = segments[run.lastIndex + 1]?.end ?? coarseEnd;
+    const start = clamp(firstSponsor ? firstSponsor.start : coarseStart, earliest, coarseEnd);
+    const end = clamp(lastSponsor ? lastSponsor.end : coarseEnd, coarseStart, latest);
+
+    console.log(`[ytsb] refined sponsor [${coarseStart.toFixed(1)}s-${coarseEnd.toFixed(1)}s] -> [${start.toFixed(1)}s-${end.toFixed(1)}s]`);
+    // No outward padding: word timings are exact, and erring outward cuts content.
+    return { start: Math.max(0, start), end: Math.max(start + 1, end) };
+  });
+}
+
+// Captions for the whole video are already downloaded by prepare-video, so the
+// coarse pass covers every segment at once instead of one window per request.
+async function analyzeCaptions(videoId, prepared) {
+  const segments = prepared.segments;
+  const withContext = segments.map((seg, i) => ({
+    ...seg,
+    context: [segments[i - 1]?.text, segments[i + 1]?.text].filter(Boolean).join(' / '),
+  }));
+  console.log(`[ytsb] video=${videoId} classifying all ${segments.length} caption segment(s)`);
+  const results = await classifySegments(withContext);
+
+  const flagged = new Set();
+  for (const seg of segments) {
+    const noul = results[seg.id]?.noul;
+    if (!Number.isFinite(noul) || noul < 0 || noul > 1) throw new Error(`Missing or invalid classifier score for ${seg.id}`);
+    if (noul >= NOUL_THRESHOLD) flagged.add(seg.id);
+  }
+
+  const runs = mergeRuns(segments, flagged);
+  console.log(`[ytsb] video=${videoId} ${flagged.size} flagged segment(s) forming ${runs.length} sponsor run(s)`);
+  const sponsorRanges = await refineRuns(runs, segments);
+
+  const state = {
+    ...(await getState(videoId)),
+    duration: prepared.duration,
+    source: prepared.source,
+    language: prepared.language,
+    processedChunks: [[0, prepared.duration]],
+    candidateSegments: segments
+      .filter((seg) => flagged.has(seg.id))
+      .map((seg) => ({ id: seg.id, start: seg.start, end: seg.end, text: seg.text, confidence: results[seg.id].noul })),
+    sponsorRanges,
+  };
+  console.log(`[ytsb] video=${videoId} sponsor ranges:`, sponsorRanges);
+  await setState(videoId, state);
+  return state;
+}
+
 async function handleChunkProcessed(videoId, chunkRange, segments) {
   const state = await getState(videoId);
   state.processedChunks = mergeChunkRange(state.processedChunks, chunkRange);
@@ -195,17 +337,11 @@ async function analyzeAhead(videoId, position) {
   }
   state = { ...state, duration: prepared.duration, source: prepared.source, language: prepared.language };
   await setState(videoId, state);
-  const range = ytsbTimeline.nextRange(state.processedChunks, position, prepared.duration, prepared.source === 'captions' ? 60 : 30);
+  if (prepared.source === 'captions') return analyzeCaptions(videoId, prepared);
+  // Whisper still costs real time per range, so audio stays windowed ahead of playback.
+  const range = ytsbTimeline.nextRange(state.processedChunks, position, prepared.duration, 30);
   if (!range) return state;
-  let segments;
-  if (prepared.source === 'captions') {
-    segments = prepared.segments.flatMap((segment, i, all) => segment.end > range[0] && segment.start < range[1]
-      ? [{ ...segment, context: [all[i - 1]?.text, all[i + 1]?.text].filter(Boolean).join(' / ') }]
-      : []);
-    console.log(`[ytsb] caption analysis video=${videoId} range=[${range}] segments=${segments.length}; Whisper not needed`);
-  } else {
-    ({ segments } = await serverRequest('transcribe-video', { videoId, start: range[0], end: range[1] }));
-  }
+  const { segments } = await serverRequest('transcribe-video', { videoId, start: range[0], end: range[1] });
   return handleChunkProcessed(videoId, range, segments);
 }
 
