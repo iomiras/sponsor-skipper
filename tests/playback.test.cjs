@@ -28,9 +28,10 @@ async function player(overrides = {}) {
         // Auto mode must leave the player untouched; only manual mode may build UI.
         if (!overrides.allowOverlay) assert.fail('No overlay should be created in auto mode');
         const element = {
-          tagName: tag, style: {}, dataset: {}, hidden: false, handlers: {},
+          tagName: tag, style: { cssText: '' }, dataset: {}, handlers: {},
           addEventListener(type, fn) { element.handlers[type] = fn; },
-          click() { element.handlers.click?.(); },
+          click() { element.handlers.click?.({ stopPropagation() {} }); },
+          get visible() { return element.style.cssText.includes('display:block'); },
         };
         return element;
       },
@@ -119,27 +120,41 @@ test('disabled extension and YouTube ads suppress sponsor skips', async () => {
   }
 });
 
-test('manual mode offers a skip button instead of seeking, and the click skips', async () => {
+test('manual mode overlays a skip button on the player instead of seeking', async () => {
   const app = await player({ settings: { skipMode: 'manual' }, allowOverlay: true });
   app.pending[0].resolve(analyzed([{ start: 5, end: 80 }]));
   await settle();
   assert.equal(app.video.currentTime, 10, 'manual mode must not move playback on its own');
   const button = app.button();
-  assert.ok(button, 'expected a skip button on the player');
-  assert.equal(button.hidden, false);
+  assert.ok(button, 'expected a skip button attached to the player');
+  assert.equal(button.visible, true);
+  // Positioned over the video like YouTube's own skip control, not in page flow.
+  assert.match(button.style.cssText, /position:absolute/);
   button.click();
   assert.equal(app.video.currentTime, 80);
-  assert.equal(button.hidden, true, 'button should disappear once the skip happened');
+  assert.equal(button.visible, false, 'button should disappear once the skip happened');
 });
 
 test('the manual button disappears once playback leaves the sponsor range', async () => {
   const app = await player({ settings: { skipMode: 'manual' }, allowOverlay: true });
   app.pending[0].resolve(analyzed([{ start: 5, end: 20 }]));
   await settle();
-  assert.equal(app.button().hidden, false);
+  assert.equal(app.button().visible, true);
   app.video.currentTime = 25;
   app.tick();
-  assert.equal(app.button().hidden, true);
+  assert.equal(app.button().visible, false);
+});
+
+test('the manual button is not shown while the extension is off or a YouTube ad plays', async () => {
+  for (const scenario of ['disabled', 'ad']) {
+    const app = await player({ settings: { skipMode: 'manual' }, allowOverlay: true });
+    app.pending[0].resolve(analyzed([{ start: 5, end: 80 }]));
+    await settle();
+    assert.equal(app.button().visible, true, 'precondition: button shows normally');
+    if (scenario === 'disabled') app.disable();
+    else { app.flags.ad = true; app.tick(); }
+    assert.equal(app.button().visible, false, `button should be hidden when ${scenario}`);
+  }
 });
 
 test('segments shorter than the minimum are reported but never skipped', async () => {

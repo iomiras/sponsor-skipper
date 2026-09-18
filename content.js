@@ -27,20 +27,26 @@ function isYouTubeAd() {
   return Boolean(document.querySelector('#movie_player.ad-showing, #movie_player.ad-interrupting'));
 }
 
+// Mirrors .ytp-ad-skip-button: flush to the right edge, sitting above the
+// progress bar, so it reads as part of the player rather than an add-on.
+const SKIP_BUTTON_STYLE = [
+  'position:absolute', 'right:0', 'bottom:12%', 'z-index:2147483000',
+  'margin:0', 'padding:10px 16px',
+  'font:500 14px/1 Roboto,Arial,system-ui,sans-serif',
+  'color:#fff', 'background:rgba(0,0,0,.6)',
+  'border:1px solid rgba(255,255,255,.3)', 'border-right:none',
+  'border-radius:3px 0 0 3px', 'cursor:pointer', 'pointer-events:auto',
+].join(';');
+
 // Built on demand: in auto mode the player is never touched, which keeps the
 // overlay out of the way of anyone who just wants the skip to happen.
 function showSkipButton(target) {
   if (!skipButton) {
     skipButton = document.createElement('button');
     skipButton.id = 'ytsb-skip-button';
-    skipButton.textContent = 'Skip sponsor';
-    skipButton.style.cssText = [
-      'position:absolute', 'right:12px', 'bottom:70px', 'z-index:2000',
-      'padding:8px 16px', 'font:500 13px/1 Roboto,system-ui,sans-serif',
-      'color:#fff', 'background:rgba(0,0,0,.75)', 'border:1px solid rgba(255,255,255,.4)',
-      'border-radius:2px', 'cursor:pointer',
-    ].join(';');
-    skipButton.addEventListener('click', () => {
+    skipButton.textContent = 'Skip sponsor ⏭';
+    skipButton.addEventListener('click', (event) => {
+      event.stopPropagation(); // a click on the player surface would pause it
       const to = Number(skipButton.dataset.target);
       console.log(`[ytsb] manual skip to ${to.toFixed(2)}s`);
       video.currentTime = to;
@@ -48,13 +54,16 @@ function showSkipButton(target) {
     });
   }
   skipButton.dataset.target = String(target);
-  const host = document.querySelector('#movie_player');
+  // The player re-renders on navigation, so re-attach rather than assuming.
+  const host = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
   if (host && skipButton.parentElement !== host) host.appendChild(skipButton);
-  skipButton.hidden = false;
+  // Written every time, and as display rather than [hidden]: any YouTube rule
+  // setting display on a player descendant would override the hidden attribute.
+  skipButton.style.cssText = `${SKIP_BUTTON_STYLE};display:block`;
 }
 
 function hideSkipButton() {
-  if (skipButton) skipButton.hidden = true;
+  if (skipButton) skipButton.style.cssText = `${SKIP_BUTTON_STYLE};display:none`;
 }
 
 function reconcilePlayback() {
