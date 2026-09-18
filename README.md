@@ -4,11 +4,11 @@ A Chrome MV3 extension that analyzes timed captions ahead of playback and skips 
 
 ## Start
 
-1. Follow `server/README.md` for dependencies. Start the backend with `cd server`, `export TYPESAFE_API_KEY='your-key'`, then `npm start`.
+1. (Optional, local development only) Follow `server/README.md` for dependencies. Start the backend with `cd server`, `export TYPESAFE_API_KEY='your-key'`, then `npm start`. Not needed if you use the deployed backend the extension already points to.
 2. Open `chrome://extensions`, enable Developer Mode, and load this project's root directory as an unpacked extension. If already loaded, click Reload.
 3. Refresh the YouTube tab and watch normally. Analysis runs in the background; detected sponsor segments are skipped automatically.
 
-After any code change, restart the server, reload the extension, and refresh YouTube.
+After any code change, reload the extension and refresh YouTube. Restart the local server too, if you are running one.
 
 ## See it in action
 
