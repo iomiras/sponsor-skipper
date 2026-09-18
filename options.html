@@ -16,10 +16,13 @@
     footer { display: flex; align-items: center; gap: 10px; }
     #saved { color: #1a7f37; opacity: 0; transition: opacity .15s; }
     #saved.show { opacity: 1; }
+    .notice { background: rgba(230, 162, 0, .15); border: 1px solid rgba(230, 162, 0, .5); border-radius: 6px; padding: 10px 12px; margin: 0 0 14px; }
   </style>
 </head>
 <body>
   <h1>Sponsor Skipper settings</h1>
+
+  <p class="notice"><strong>By default, this extension skips detected sponsor segments automatically, with no prompt.</strong> Choose "Ask me first" below if you want a button instead.</p>
 
   <fieldset>
     <legend>Sponsor segments</legend>

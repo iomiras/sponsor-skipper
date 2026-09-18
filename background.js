@@ -446,3 +446,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   });
   return true; // keep the message channel open for the async response
 });
+
+// New installs skip sponsors automatically with no prompt; open settings once so
+// people see that default and can switch to "ask me first" before it surprises them.
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === 'install') chrome.runtime.openOptionsPage();
+});
