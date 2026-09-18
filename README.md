@@ -10,6 +10,14 @@ A Chrome MV3 extension that analyzes timed captions ahead of playback and skips 
 
 After any code change, restart the server, reload the extension, and refresh YouTube.
 
+## See it in action
+
+The extension reads the video's timed captions, sends caption segments to Jev for sponsor classification, and stores the detected sponsor ranges. During playback, the extension either skips a detected range automatically or shows a **Skip sponsor** button, depending on the selected setting.
+
+![Sponsor Skipper workflow](image.png)
+
+The demo has two parts: it first shows automatic skipping, then shows the YouTube-style **Skip sponsor** button appearing over the player and being clicked: [watch the demo video](demo.mp4).
+
 ## Analysis ahead of playback
 
 - Fetches the full timed subtitles, including automatic captions, without running Whisper when captions are usable.

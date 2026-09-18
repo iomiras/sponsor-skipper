@@ -96,7 +96,6 @@ async function classifySegments(segments) {
   }
   for (let i = 0; i < batches.length; i += CLASSIFY_CONCURRENCY) {
     const group = batches.slice(i, i + CLASSIFY_CONCURRENCY);
-    console.log(`[ytsb] classifying ${group.length} Jev batch(es) in parallel`);
     const completed = await Promise.all(group.map((batch) => classifyBatch(batch)));
     for (const batchResults of completed) Object.assign(results, batchResults);
   }
@@ -137,7 +136,6 @@ async function classifyBatch(segments) {
   const direct = Boolean(ownKey);
   const url = direct ? TYPESAFE_URL : PROXY_URL;
   const requestBody = direct ? buildTypeSafeRequest(segments) : body;
-  console.log(`[ytsb] sending ${segments.length} segment(s) to Jev via ${direct ? 'personal API key' : 'local proxy'}`);
 
   const maxRetries = 4;
   let attempt = 0;
@@ -150,13 +148,13 @@ async function classifyBatch(segments) {
         body: JSON.stringify(requestBody),
       });
     } catch (err) {
-      console.warn(`[ytsb] Jev request failed (attempt ${attempt}):`, err.message);
+      console.error(`[ytsb] Jev request failed (attempt ${attempt}):`, err.message);
       if (attempt >= maxRetries) throw err;
       await backoff(attempt++);
       continue;
     }
     if (res.status === 429 || res.status === 529) {
-      console.warn(`[ytsb] Jev proxy overloaded (${res.status}), retrying...`);
+      console.error(`[ytsb] Jev proxy overloaded (${res.status}), retrying...`);
       if (attempt >= maxRetries) throw new Error(`proxy overloaded: ${res.status}`);
       await backoff(attempt++);
       continue;
@@ -168,8 +166,6 @@ async function classifyBatch(segments) {
     }
     const data = await res.json();
     const results = direct ? mapTypeSafeResults(data.answers) : data.results || {};
-    const scores = Object.values(results);
-    console.log(`[ytsb] Jev returned ${scores.length} score(s), ${scores.filter((s) => s.noul >= NOUL_THRESHOLD).length} above threshold`);
     return results;
   }
 }
@@ -279,7 +275,6 @@ async function refineRuns(runs, segments) {
     const start = clamp(firstSponsor ? firstSponsor.start : coarseStart, earliest, coarseEnd);
     const end = clamp(lastSponsor ? lastSponsor.end : coarseEnd, coarseStart, latest);
 
-    console.log(`[ytsb] refined sponsor [${coarseStart.toFixed(1)}s-${coarseEnd.toFixed(1)}s] -> [${start.toFixed(1)}s-${end.toFixed(1)}s]`);
     // No outward padding: word timings are exact, and erring outward cuts content.
     return { start: Math.max(0, start), end: Math.max(start + 1, end) };
   });
@@ -293,7 +288,6 @@ async function analyzeCaptions(videoId, prepared) {
     ...seg,
     context: [segments[i - 1]?.text, segments[i + 1]?.text].filter(Boolean).join(' / '),
   }));
-  console.log(`[ytsb] video=${videoId} classifying all ${segments.length} caption segment(s)`);
   const results = await classifySegments(withContext);
 
   const flagged = new Set();
@@ -304,7 +298,6 @@ async function analyzeCaptions(videoId, prepared) {
   }
 
   const runs = mergeRuns(segments, flagged);
-  console.log(`[ytsb] video=${videoId} ${flagged.size} flagged segment(s) forming ${runs.length} sponsor run(s)`);
   const sponsorRanges = await refineRuns(runs, segments);
 
   const state = {
@@ -318,7 +311,6 @@ async function analyzeCaptions(videoId, prepared) {
       .map((seg) => ({ id: seg.id, start: seg.start, end: seg.end, text: seg.text, confidence: results[seg.id].noul })),
     sponsorRanges,
   };
-  console.log(`[ytsb] video=${videoId} sponsor ranges:`, sponsorRanges);
   await setState(videoId, state);
   return state;
 }
@@ -330,10 +322,6 @@ async function handleChunkProcessed(videoId, chunkRange, segments) {
   // Brand pitches often have no explicit "sponsor" or "promo code" phrase.
   // Let the classifier judge all spoken text, using adjacent segments as context.
   const spoken = segments.filter((seg) => seg.text.trim().length > 0);
-  console.log(`[ytsb] video=${videoId} chunk=[${chunkRange.join(', ')}]: ${spoken.length} non-empty transcript segment(s) for classification`);
-  if (spoken.length === 0) {
-    console.log('[ytsb] skipping /classify because the transcript is empty');
-  }
   if (spoken.length > 0) {
     const withContext = spoken.map((seg, i) => ({
       ...seg,
@@ -344,14 +332,12 @@ async function handleChunkProcessed(videoId, chunkRange, segments) {
       const noul = results[seg.id]?.noul;
       if (!Number.isFinite(noul) || noul < 0 || noul > 1) throw new Error(`Missing or invalid classifier score for ${seg.id}`);
       // Only the accepted ones, since a rejected score says nothing useful.
-      if (noul >= NOUL_THRESHOLD) console.log(`[ytsb] sponsor segment ${seg.id} [${seg.start.toFixed(1)}s-${seg.end.toFixed(1)}s] score=${noul}`);
       state.candidateSegments = state.candidateSegments.filter((candidate) => candidate.id !== seg.id);
       state.candidateSegments.push({ id: seg.id, start: seg.start, end: seg.end, text: seg.text, confidence: noul });
     }
   }
 
   state.sponsorRanges = mergeSponsorRanges(state.candidateSegments);
-  console.log(`[ytsb] video=${videoId} sponsor ranges:`, state.sponsorRanges);
   await setState(videoId, state);
   return state;
 }
@@ -435,9 +421,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse(await queueAnalysis(msg.videoId, msg.position));
         break;
       case 'transcribeChunk': {
-        console.log(`[ytsb] sending chunk [${msg.chunkRange[0]}s-${msg.chunkRange[1]}s] to local Whisper server`);
         const segments = await transcribeAudio(msg.pcm, msg.sampleRate, msg.chunkRange[0]);
-        console.log(`[ytsb] transcribed chunk [${msg.chunkRange[0]}s-${msg.chunkRange[1]}s]: ${segments.length} segment(s)`, segments);
         const state = await handleChunkProcessed(msg.videoId, msg.chunkRange, segments);
         sendResponse({ videoId: msg.videoId, chunkRange: msg.chunkRange, sponsorRanges: state.sponsorRanges });
         break;

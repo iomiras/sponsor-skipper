@@ -1,5 +1,4 @@
 // Playback is independent of analysis. No MediaElementAudioSource or live tap.
-console.log('[ytsb] caption-first player controller loaded');
 
 const LOOKAHEAD_SECONDS = 120;
 let videoId = null;
@@ -58,7 +57,6 @@ function showSkipButton(target) {
       consumePlayerEvent(event); // do not let YouTube's player surface handle it
       const to = Number(skipButton.dataset.target);
       if (!video || !Number.isFinite(to)) return;
-      console.log(`[ytsb] manual skip to ${to.toFixed(2)}s`);
       video.currentTime = to;
       hideSkipButton();
       tick();
@@ -69,10 +67,6 @@ function showSkipButton(target) {
   const host = document.querySelector('.html5-video-player') || document.querySelector('#movie_player');
   if (!host) {
     hideSkipButton();
-    if (!showSkipButton.lastMissingHostLog || Date.now() - showSkipButton.lastMissingHostLog > 5000) {
-      console.debug('[ytsb] manual skip button waiting for the YouTube player host');
-      showSkipButton.lastMissingHostLog = Date.now();
-    }
     return;
   }
   if (skipButton.parentElement !== host) host.appendChild(skipButton);
@@ -101,7 +95,6 @@ function reconcilePlayback() {
     showSkipButton(target);
     return;
   }
-  console.log(`[ytsb] skipping detected sponsor [${time.toFixed(2)}s-${target.toFixed(2)}s]`);
   video.currentTime = target;
 }
 
@@ -118,7 +111,7 @@ function resetVideo(id) {
     if (!state.duration) state = cached;
     reconcilePlayback();
   }).catch((err) => {
-    if (currentGeneration === generation) console.warn('[ytsb] could not load cached analysis:', err.message);
+    if (currentGeneration === generation) console.error('[ytsb] could not load cached analysis:', err.message);
   });
 }
 
@@ -144,11 +137,9 @@ function tick() {
   busy = true;
   error = '';
   const currentGeneration = generation;
-  console.log(`[ytsb] analyzing ahead: video=${id}, position=${position.toFixed(2)}s`);
   message({ type: 'analyzeAhead', videoId: id, position }).then((result) => {
     if (currentGeneration !== generation) return;
     state = result;
-    console.log(`[ytsb] source=${state.source}, checked ranges:`, state.processedChunks, 'sponsors:', state.sponsorRanges);
   }).catch((err) => {
     if (currentGeneration !== generation) return;
     error = err.message;
