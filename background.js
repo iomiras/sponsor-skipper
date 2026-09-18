@@ -1,7 +1,7 @@
 importScripts('timeline.js', 'settings.js');
 
-// MV3 service worker: sole owner of chrome.storage.local and the local server calls
-// (both /transcribe and /classify - the only file that talks to localhost:8787).
+// MV3 service worker: sole owner of chrome.storage.local and the backend server calls
+// (both /transcribe and /classify - the only file that talks to the backend server).
 // Message contract:
 //   content.js -> here: { type: 'getState', videoId } -> VideoState
 //   content.js -> here: { type: 'transcribeChunk', videoId, chunkRange, pcm: base64, sampleRate }
@@ -10,8 +10,9 @@ importScripts('timeline.js', 'settings.js');
 //   any page    -> here: { type: 'getSettings' } -> Settings
 //   any page    -> here: { type: 'setSettings', settings } -> merged Settings
 
-const TRANSCRIBE_URL = 'http://localhost:8787/transcribe';
-const PROXY_URL = 'http://localhost:8787/classify';
+const SERVER_ORIGIN = 'https://sponsor-skipper.iomiras.com';
+const TRANSCRIBE_URL = `${SERVER_ORIGIN}/transcribe`;
+const PROXY_URL = `${SERVER_ORIGIN}/classify`;
 const TYPESAFE_URL = 'https://api.typesafe.ai/v1/systemone';
 const NOUL_THRESHOLD = 0.6; // starting default, tune via testing
 const MERGE_GAP_SECONDS = 15;
@@ -343,7 +344,7 @@ async function handleChunkProcessed(videoId, chunkRange, segments) {
 }
 
 async function serverRequest(endpoint, body) {
-  const response = await fetch(`http://localhost:8787/${endpoint}`, {
+  const response = await fetch(`${SERVER_ORIGIN}/${endpoint}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
   const data = await response.json();

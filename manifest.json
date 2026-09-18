@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Analyzes captions ahead of playback to skip sponsor reads, with local speech-to-text as a fallback.",
   "permissions": ["storage", "tabs"],
-  "host_permissions": ["*://*.youtube.com/*", "http://localhost/*", "https://api.typesafe.ai/*"],
+  "host_permissions": ["*://*.youtube.com/*", "https://sponsor-skipper.iomiras.com/*", "https://api.typesafe.ai/*"],
   "background": {
     "service_worker": "background.js"
   },
