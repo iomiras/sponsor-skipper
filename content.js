@@ -36,6 +36,7 @@ const SKIP_BUTTON_STYLE = [
   'color:#fff', 'background:rgba(0,0,0,.6)',
   'border:1px solid rgba(255,255,255,.3)', 'border-right:none',
   'border-radius:3px 0 0 3px', 'cursor:pointer', 'pointer-events:auto',
+  'display:flex!important', 'visibility:visible!important', 'opacity:1!important',
 ].join(';');
 
 // Built on demand: in auto mode the player is never touched, which keeps the
@@ -44,26 +45,44 @@ function showSkipButton(target) {
   if (!skipButton) {
     skipButton = document.createElement('button');
     skipButton.id = 'ytsb-skip-button';
+    skipButton.type = 'button';
+    skipButton.setAttribute('aria-label', 'Skip detected sponsor segment');
     skipButton.textContent = 'Skip sponsor ⏭';
+    const consumePlayerEvent = (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    skipButton.addEventListener('pointerdown', consumePlayerEvent, true);
+    skipButton.addEventListener('mousedown', consumePlayerEvent, true);
     skipButton.addEventListener('click', (event) => {
-      event.stopPropagation(); // a click on the player surface would pause it
+      consumePlayerEvent(event); // do not let YouTube's player surface handle it
       const to = Number(skipButton.dataset.target);
+      if (!video || !Number.isFinite(to)) return;
       console.log(`[ytsb] manual skip to ${to.toFixed(2)}s`);
       video.currentTime = to;
       hideSkipButton();
+      tick();
     });
   }
   skipButton.dataset.target = String(target);
   // The player re-renders on navigation, so re-attach rather than assuming.
-  const host = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
-  if (host && skipButton.parentElement !== host) host.appendChild(skipButton);
+  const host = document.querySelector('.html5-video-player') || document.querySelector('#movie_player');
+  if (!host) {
+    hideSkipButton();
+    if (!showSkipButton.lastMissingHostLog || Date.now() - showSkipButton.lastMissingHostLog > 5000) {
+      console.debug('[ytsb] manual skip button waiting for the YouTube player host');
+      showSkipButton.lastMissingHostLog = Date.now();
+    }
+    return;
+  }
+  if (skipButton.parentElement !== host) host.appendChild(skipButton);
   // Written every time, and as display rather than [hidden]: any YouTube rule
   // setting display on a player descendant would override the hidden attribute.
-  skipButton.style.cssText = `${SKIP_BUTTON_STYLE};display:block`;
+  skipButton.style.cssText = `${SKIP_BUTTON_STYLE};display:flex`;
 }
 
 function hideSkipButton() {
-  if (skipButton) skipButton.style.cssText = `${SKIP_BUTTON_STYLE};display:none`;
+  if (skipButton) skipButton.style.cssText = `${SKIP_BUTTON_STYLE};display:none!important`;
 }
 
 function reconcilePlayback() {

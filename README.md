@@ -19,6 +19,7 @@ After any code change, restart the server, reload the extension, and refresh You
 - Playback continues while analysis runs, including after seeking into unchecked content. A newly detected sponsor is skipped immediately if playback is already inside it. There is no preparation overlay or automatic pause/resume.
 - Caches completed classifications in extension storage. Concurrent tabs of the same video serialize updates. Old live-capture cache entries are ignored.
 - The popup shows the source, seconds checked ahead, and detected ranges. Failed analysis retries after 30 seconds without interrupting playback.
+- Automatic skipping is the default. Use **Use manual button** in the popup (or choose the manual mode in Settings) to show the on-player button; it appears only while playback is inside a detected sponsor range.
 
 ## Limitations
 

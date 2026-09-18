@@ -10,16 +10,23 @@ async function main() {
   const rangesEl = document.getElementById('ranges');
   const emptyEl = document.getElementById('empty');
   const modeEl = document.getElementById('mode');
+  const toggleMode = document.getElementById('toggleMode');
   document.getElementById('openSettings').addEventListener('click', () => chrome.runtime.openOptionsPage());
 
   let settings = await chrome.runtime.sendMessage({ type: 'getSettings' });
   const showSettings = () => {
     toggle.checked = settings.enabled;
-    modeEl.textContent = settings.skipMode === 'manual' ? 'Manual: shows a skip button' : 'Skipping automatically';
+    const manual = settings.skipMode === 'manual';
+    modeEl.textContent = manual ? 'Manual button mode' : 'Automatic mode';
+    toggleMode.textContent = manual ? 'Use automatic skipping' : 'Use manual button';
   };
   showSettings();
   toggle.addEventListener('change', async () => {
     settings = await chrome.runtime.sendMessage({ type: 'setSettings', settings: { enabled: toggle.checked } });
+    showSettings();
+  });
+  toggleMode.addEventListener('click', async () => {
+    settings = await chrome.runtime.sendMessage({ type: 'setSettings', settings: { skipMode: settings.skipMode === 'manual' ? 'auto' : 'manual' } });
     showSettings();
   });
   if (!videoId) { status.textContent = 'Not on a video page.'; return; }

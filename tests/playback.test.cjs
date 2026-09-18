@@ -28,16 +28,17 @@ async function player(overrides = {}) {
         // Auto mode must leave the player untouched; only manual mode may build UI.
         if (!overrides.allowOverlay) assert.fail('No overlay should be created in auto mode');
         const element = {
-          tagName: tag, style: { cssText: '' }, dataset: {}, handlers: {},
+          tagName: tag, type: '', style: { cssText: '' }, dataset: {}, handlers: {}, parentElement: null,
+          setAttribute() {},
           addEventListener(type, fn) { element.handlers[type] = fn; },
-          click() { element.handlers.click?.({ stopPropagation() {} }); },
-          get visible() { return element.style.cssText.includes('display:block'); },
+          click() { element.handlers.click?.({ preventDefault() {}, stopImmediatePropagation() {} }); },
+          get visible() { return !/display:none!important/.test(element.style.cssText); },
         };
         return element;
       },
       querySelector(selector) {
         if (selector.includes('ad-showing')) return flags.ad;
-        if (selector === '#movie_player') return host;
+        if (selector === '#movie_player' || selector === '.html5-video-player') return host;
         return video;
       },
     },
@@ -133,6 +134,22 @@ test('manual mode overlays a skip button on the player instead of seeking', asyn
   button.click();
   assert.equal(app.video.currentTime, 80);
   assert.equal(button.visible, false, 'button should disappear once the skip happened');
+});
+
+test('manual button consumes player pointer events and uses explicit visible styling', async () => {
+  const app = await player({ settings: { skipMode: 'manual' }, allowOverlay: true });
+  app.pending[0].resolve(analyzed([{ start: 5, end: 80 }]));
+  await settle();
+  const button = app.button();
+  assert.equal(button.type, 'button');
+  assert.match(button.style.cssText, /display:flex/);
+  assert.ok(button.handlers.pointerdown);
+  assert.ok(button.handlers.mousedown);
+  let prevented = false;
+  let stopped = false;
+  button.handlers.pointerdown({ preventDefault() { prevented = true; }, stopImmediatePropagation() { stopped = true; } });
+  assert.equal(prevented, true);
+  assert.equal(stopped, true);
 });
 
 test('the manual button disappears once playback leaves the sponsor range', async () => {
